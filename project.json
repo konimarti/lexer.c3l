@@ -1,0 +1,15 @@
+{
+	"authors": [ "Koni Marti <koni.marti@gmail.com>" ],
+	"version": "0.1.0",
+	"output": "build",
+	"sources": [ "*" ],
+	"targets": {
+		"testrunner": {
+			"type": "executable"
+		},
+		"lexv": {
+			"type": "executable",
+			"sources": [ "src/lexv/*" ]
+		}
+	}
+}
