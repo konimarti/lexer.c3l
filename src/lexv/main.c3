@@ -78,7 +78,7 @@ fn bool? validate(String filename, String tokens) => @pool()
 		}
 
 		String tok_str = token_to_string(tok);
-		buf.append_chars(tok_str);
+		buf.append_string(tok_str);
 		buf.append_char(' ');
 		String s = buf.str_view();
 		if (s != tokens[:s.len])
@@ -162,9 +162,8 @@ fn String token_to_string(Token tok)
 	case STRING: return "STRING";
 	case CHAR_LITERAL: return "CHAR_LITERAL";
 	case BYTES: return "BYTES";
-	case NUMBER: return "INTEGER";
-	// case INTEGER: return "INTEGER";
-	// case REAL: return "FLOAT";
+	case INTEGER: return "INTEGER";
+	case REAL: return "FLOAT";
 	case IDENT: return "IDENT";
 	case TYPE_IDENT: return "TYPE_IDENT";
 	case CONST_IDENT: return "CONST_IDENT";
