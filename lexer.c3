@@ -92,16 +92,17 @@ fn usz? Token.to_format(&self, Formatter *f) @dynamic
 struct Lexer
 {
 	String input;
-	usz pos;
-	usz ln, col;
-	usz token_start;
-	usz nl_before;
+	usz  pos;
+	usz  ln, col;
+	usz  token_start;
+	usz  nl_before;
+	bool inside_bracket;
 }
 
 fn Lexer* Lexer.init(&self, String input)
 {
 	*self = { .input = input, .pos = 0, .token_start = 0,
-		.nl_before = 0, .ln = 1, .col = 1 };
+		.nl_before = 0, .ln = 1, .col = 1, .inside_bracket = false };
 	return self;
 }
 
@@ -315,12 +316,12 @@ fn Token? Lexer.next(&self)
 			switch
 			{
 				case self.must("[<"):  type = LVEC;
-				case self.must("["):   type = LBRACKET;
+				case self.must("["):   type = LBRACKET; self.inside_bracket = true;
 				default: return INVALID_CHAR?;
 			}
 			return self.emit_token(type);
 
-		case ']': self.advance()!; return self.emit_token(RBRACKET);
+		case ']': self.advance()!; self.inside_bracket = false; return self.emit_token(RBRACKET);
 		case '{': self.advance()!; return self.emit_token(LBRACE);
 		case '}': self.advance()!; return self.emit_token(RBRACE);
 		case '(': self.advance()!; return self.emit_token(LPAREN);
@@ -457,6 +458,11 @@ fn Token? Lexer.lex_number(&self)
 	char c;
 	int i = 0;
 	TokenType type = INTEGER;
+	if (self.inside_bracket)
+	{
+		while (!self.at_end() && (c = self.peek()) && is_digit(c)) self.advance()!;
+		return self.emit_token(type);
+	}
 	while (!self.at_end() && (c = self.peek()) && (is_digit(c) || c == '-' ||
 		(i > 0 && (ascii::is_xdigit(c) || ascii::is_bdigit(c) || ascii::is_odigit(c) ||
 		        c == '.' || c == 'e' || c == 'E' || c == '+' ||
@@ -757,6 +763,7 @@ fn void test_doc_lexer() @test
 		 Check if a character is in a set.
 
 		 @param c : "the character to check"
+
 		 @param [in] set : "String containing the characters"
 		 @pure
 		 @return "True if a character is in the set"
@@ -772,7 +779,7 @@ fn void test_doc_lexer() @test
 
 	while (try tok = dl.next() && want.len)
 	{
-		assert(tok.type == want[0]);
+		assert(tok.type == want[0], "Token type mismatch: got=%s, but want=%s", tok.type, want[0]);
 		want = want[1..];
 	}
 }
