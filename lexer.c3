@@ -151,7 +151,7 @@ fn char Lexer.peek2(&self)
 fn bool Lexer.must(&self, String s)
 {
 	usz n = s.len;
-	if (self.pos+n < self.input.len && self.input[self.pos:n] == s)
+	if (self.pos+n-1 < self.input.len && self.input[self.pos:n] == s)
 	{
 		while (n--) (void)self.advance();
 		return true;
