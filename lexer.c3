@@ -92,15 +92,16 @@ fn usz? Token.to_format(&self, Formatter *f) @dynamic
 struct Lexer
 {
 	String input;
+	bool emit_eol;
 	usz  pos;
 	usz  ln, col;
 	usz  token_start;
 	usz  nl_before;
 }
 
-fn Lexer* Lexer.init(&self, String input)
+fn Lexer* Lexer.init(&self, String input, bool emit_eol = false)
 {
-	*self = { .input = input, .pos = 0, .token_start = 0,
+	*self = { .input = input, .emit_eol = emit_eol, .pos = 0, .token_start = 0,
 		.nl_before = 0, .ln = 1, .col = 1 };
 	return self;
 }
@@ -357,8 +358,16 @@ fn Token? Lexer.next(&self)
 			return self.emit_token(type);
 
 		case '$': return self.lex_compile_time()!;
-		case '#': return self.lex_hash_ident()!;
 		case '@': return self.lex_attribute();
+		case '#':
+			switch
+			{
+				case self.must("#!"):
+					self.scan_line_comment()!;
+					return self.emit_token(LCOMMENT);
+				default:
+					return self.lex_hash_ident()!;
+			}
 
 		case 'b':
 		case 'x':
@@ -381,6 +390,7 @@ fn Token? Lexer.next(&self)
 		case '`':
 			self.scan_string()!;
 			return self.emit_token(STRING);
+		case '\n': self.advance()!; return self.emit_token(EOL);
 		default:
 			if (is_digit(c)) return self.lex_number()!;
 			if (is_ident(c)) return self.lex_ident()!;
@@ -395,7 +405,11 @@ fn Token? Lexer.next(&self)
 fn void? Lexer.scan_whitespace(&self)
 {
 	char c;
-	while (!self.at_end() && (c = self.peek()) && is_ws(c)) self.advance()!;
+	while (!self.at_end() && (c = self.peek()) && is_ws(c))
+	{
+		if (self.emit_eol && c == '\n') break;
+		self.advance()!;
+	}
 }
 
 fn void? Lexer.scan_until(&self, char until)
@@ -740,36 +754,31 @@ struct DocLexer
 
 fn DocLexer* DocLexer.init(&self, String doc_str)
 {
-	*self = { .splitter = doc_str.tokenize_all("\n", true), .lexer = {}, .lexer_init = false };
+	*self = {
+		.splitter   = doc_str.strip("<*").strip_end("*>").tokenize_all("\n", true),
+		.lexer      = {},
+		.lexer_init = false,
+	};
 	return self;
 }
 
 fn Token? DocLexer.next(&self)
 {
-	if (self.lexer.at_end())
+	if (!self.lexer_init)
 	{
-		if (self.lexer_init)
+		usz pos;
+		pos = self.splitter.current;
+		while (try next_line = self.splitter.next())
 		{
-			if (try next_line = self.splitter.next())
+			if (next_line.trim().starts_with("@"))
 			{
-				bool starts_with_colon = next_line.trim().len > 0 && next_line.trim()[0] == ':';
-				if (next_line.trim().starts_with("@") || starts_with_colon) self.lexer.init(next_line);
-				return { .type = EOL };
-			}
-		}
-		else
-		{
-			while (try next_line = self.splitter.next())
-			{
- 				// TODO: trim <* *> when lexing?
-				next_line = next_line.trim(" \n\t\r\f\v<**>");
-				if (!next_line.trim().starts_with("@")) continue;
-				self.lexer.init(next_line);
+				// io::printfn("lexer_init: '%s'", self.splitter.string[pos..]);
+				self.lexer.init(self.splitter.string[pos..], emit_eol: true);
 				self.lexer_init = true;
 				break;
 			}
+			pos = self.splitter.current;
 		}
-
 	}
 	return self.lexer.next();
 }
@@ -777,7 +786,7 @@ fn Token? DocLexer.next(&self)
 fn void test_doc_lexer() @test
 {
 	DocLexer dl;
-	dl.init(`
+	dl.init(`<*
 		 Check if a character is in a set.
 
 		 @param c : "the character to check"
@@ -786,7 +795,7 @@ fn void test_doc_lexer() @test
 		 @param [in] set : "String containing the characters"
 		 @pure
 		 @return "True if a character is in the set"
-	`);
+		 *>`);
 
 	TokenType[] want = {
 		AT_IDENT, IDENT, COLON, STRING, EOL, EOL, EOL,
@@ -798,6 +807,7 @@ fn void test_doc_lexer() @test
 
 	while (try tok = dl.next() && want.len)
 	{
+		// io::printfn("got: %s, want: %s", tok.type, want[0]);
 		assert(tok.type == want[0], "Token type mismatch: got=%s, but want=%s", tok.type, want[0]);
 		want = want[1..];
 	}
