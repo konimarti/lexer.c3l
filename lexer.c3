@@ -477,7 +477,6 @@ fn Token? Lexer.lex_number(&self)
 {
 	char c, prev;
 	int i = 0;
-	TokenType type = INTEGER;
 	while (!self.at_end() && (c = self.peek()) && (is_digit(c) || c == '-' ||
 		(i > 0 && (ascii::is_xdigit(c) || ascii::is_bdigit(c) || ascii::is_odigit(c) ||
 		        c == '.' || c == 'e' || c == 'E' || c == '+' ||
@@ -488,23 +487,14 @@ fn Token? Lexer.lex_number(&self)
 	{
 		if ((c == '+' || c == '-') && (prev != 'e' && prev != 'E' && prev != 'p' && prev != 'P')) break;
 		if (c == '.' && self.peek2() == '.') break;
-		if (c == '.' || c == 'p' || c == 'P') type = REAL;
 		self.advance()!;
 		i++;
 		prev = c;
 	}
 
-	// Handle real-type suffixes (f, d) and e, E
-	if (type == INTEGER)
-	{
-		usz len = self.pos - self.token_start;
-		String str = self.input[self.token_start:len];
-		bool hex_prefix = str.starts_with("0x") || str.starts_with("0X");
-		bool realtype = str.ends_with("f") || str.ends_with("d") || str.contains("e") || str.contains("E");
-		if (!hex_prefix && realtype) type = REAL;
-	}
-
-	return self.emit_token(type);
+	usz len = self.pos - self.token_start;
+	String str = self.input[self.token_start:len];
+	return self.emit_token(classify_number(str));
 }
 
 fn Token? Lexer.lex_attribute(&self)
@@ -813,8 +803,6 @@ fn void test_doc_lexer() @test
 	}
 }
 
-module c3::number;
-
 enum NumberState : const inline char
 {
 	INIT    = 0,
@@ -828,14 +816,12 @@ enum NumberState : const inline char
 	HEXREAL = 8
 }
 
-bool[NumberState.len] accept_number_states = { [NumberState.INTEGER] = true, [NumberState.REAL] = true };
-
-NumberState[][] transitions = {
+NumberState[*][*] transitions = {
 	// Alphabet
 	// [0]      [1]      [2-7]    [8-9]    [_]      [aA]     [bB]     [cC]     [dD]    [eE]      [fF]     [iI]     [lL]     [oO]    [pP]     [uU]     [xX]    [+-]     [.]      [eof]
 	{  ZERO,    INTEGER, INTEGER, INTEGER, ERROR,   ERROR,   ERROR,   ERROR,   ERROR,  ERROR,    ERROR,   ERROR,   ERROR,   ERROR,  ERROR,   ERROR,   ERROR,  INIT,    ERROR,   ERROR   }, // State 0: INIT
 	{  INTEGER, INTEGER, INTEGER, INTEGER, INTEGER, ERROR,   ERROR,   ERROR,   REAL,   REAL,     REAL,    INTEGER, INTEGER, ERROR,  REAL,    INTEGER, ERROR,  ERROR,   REAL,    INTEGER }, // State 1: INTEGER
-	{  INTEGER, INTEGER, INTEGER, INTEGER, INTEGER, ERROR,   BININT,  ERROR,   ERROR,  ERROR,    ERROR,   ERROR,   ERROR,   OCTINT, ERROR,   ERROR,   HEXINT, ERROR,   ERROR,   ERROR   }, // State 2: ZERO
+	{  INTEGER, INTEGER, INTEGER, INTEGER, INTEGER, ERROR,   BININT,  ERROR,   REAL,   ERROR,    REAL,    INTEGER, INTEGER, OCTINT, ERROR,   INTEGER, HEXINT, ERROR,   REAL,    INTEGER }, // State 2: ZERO
 	{  HEXINT,  HEXINT,  HEXINT,  HEXINT,  HEXINT,  HEXINT,  HEXINT,  HEXINT,  HEXINT, HEXINT,   HEXINT,  INTEGER, INTEGER, ERROR,  HEXREAL, INTEGER, ERROR,  ERROR,   HEXREAL, INTEGER }, // State 3: HEXINT
 	{  OCTINT,  OCTINT,  OCTINT,  ERROR,   OCTINT,  ERROR,   ERROR,   ERROR,   ERROR,  ERROR,    ERROR,   INTEGER, INTEGER, ERROR,  ERROR,   INTEGER, ERROR,  ERROR,   ERROR,   INTEGER }, // State 4: OCTINT
 	{  BININT,  BININT,  ERROR,   ERROR,   BININT,  ERROR,   ERROR,   ERROR,   ERROR,  ERROR,    ERROR,   INTEGER, INTEGER, ERROR,  ERROR,   INTEGER, ERROR,  ERROR,   ERROR,   INTEGER }, // State 5: BININT
@@ -874,6 +860,19 @@ fn NumberState next_state(NumberState s, char c, bool eol = false)
 }
 
 
+fn TokenType classify_number(String s)
+{
+	NumberState state = INIT;
+	foreach (c: s) state = next_state(state, c);
+	state = next_state(state, 0, true);
+	switch (state)
+	{
+		case INTEGER: return TokenType.INTEGER;
+		case REAL:    return TokenType.REAL;
+		default:      return TokenType.INVALID;
+	}
+}
+
 struct TestCase
 {
 	String      str;
@@ -883,15 +882,22 @@ struct TestCase
 fn void test_number_state() @test
 {
 	TestCase[*] tests = {
+		{ .str  = "+",          .want = ERROR },
+		{ .str  = "-",          .want = ERROR },
+		{ .str  = "0",          .want = INTEGER },
+		{ .str  = "-1",         .want = INTEGER },
 		{ .str  = "123",        .want = INTEGER },
 		{ .str  = "123ul",      .want = INTEGER },
 		{ .str  = "123i32",     .want = INTEGER },
 		{ .str  = "0xdeadbeeF", .want = INTEGER },
 		{ .str  = "0xcafeUL",   .want = INTEGER },
-		{ .str  = "0xbeeF.123", .want = REAL },
+		{ .str  = "0b101UL",    .want = INTEGER },
+		{ .str  = "1xbeef",     .want = ERROR },
 		{ .str  = "0b1001.001", .want = ERROR },
 		{ .str  = "0b123",      .want = ERROR },
-		{ .str  = "0b101UL",    .want = INTEGER },
+		{ .str  = "0xbeeF.123", .want = REAL },
+		{ .str  = "0f",         .want = REAL },
+		{ .str  = "0.5f",       .want = REAL },
 		{ .str  = "123.0",      .want = REAL },
 		{ .str  = "123.0e-10",  .want = REAL },
 		{ .str  = "123f",       .want = REAL },
