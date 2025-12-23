@@ -786,7 +786,7 @@ fn Token? DocLexer.next(&self)
 fn void test_doc_lexer() @test
 {
 	DocLexer dl;
-	dl.init(`<*
+	dl.init(`*
 		 Check if a character is in a set.
 
 		 @param c : "the character to check"
@@ -812,3 +812,98 @@ fn void test_doc_lexer() @test
 		want = want[1..];
 	}
 }
+
+module c3::number;
+
+enum NumberState : const inline char
+{
+	INIT    = 0,
+	INTEGER = 1,
+	ZERO    = 2,
+	HEXINT  = 3,
+	OCTINT  = 4,
+	BININT  = 5,
+	REAL    = 6,
+	ERROR   = 7,
+	HEXREAL = 8
+}
+
+bool[NumberState.len] accept_number_states = { [NumberState.INTEGER] = true, [NumberState.REAL] = true };
+
+NumberState[][] transitions = {
+	// Alphabet
+	// [0]      [1]      [2-7]    [8-9]    [_]      [aA]     [bB]     [cC]     [dD]    [eE]      [fF]     [iI]     [lL]     [oO]    [pP]     [uU]     [xX]    [+-]     [.]      [eof]
+	{  ZERO,    INTEGER, INTEGER, INTEGER, ERROR,   ERROR,   ERROR,   ERROR,   ERROR,  ERROR,    ERROR,   ERROR,   ERROR,   ERROR,  ERROR,   ERROR,   ERROR,  INIT,    ERROR,   ERROR   }, // State 0: INIT
+	{  INTEGER, INTEGER, INTEGER, INTEGER, INTEGER, ERROR,   ERROR,   ERROR,   REAL,   REAL,     REAL,    INTEGER, INTEGER, ERROR,  REAL,    INTEGER, ERROR,  ERROR,   REAL,    INTEGER }, // State 1: INTEGER
+	{  INTEGER, INTEGER, INTEGER, INTEGER, INTEGER, ERROR,   BININT,  ERROR,   ERROR,  ERROR,    ERROR,   ERROR,   ERROR,   OCTINT, ERROR,   ERROR,   HEXINT, ERROR,   ERROR,   ERROR   }, // State 2: ZERO
+	{  HEXINT,  HEXINT,  HEXINT,  HEXINT,  HEXINT,  HEXINT,  HEXINT,  HEXINT,  HEXINT, HEXINT,   HEXINT,  INTEGER, INTEGER, ERROR,  HEXREAL, INTEGER, ERROR,  ERROR,   HEXREAL, INTEGER }, // State 3: HEXINT
+	{  OCTINT,  OCTINT,  OCTINT,  ERROR,   OCTINT,  ERROR,   ERROR,   ERROR,   ERROR,  ERROR,    ERROR,   INTEGER, INTEGER, ERROR,  ERROR,   INTEGER, ERROR,  ERROR,   ERROR,   INTEGER }, // State 4: OCTINT
+	{  BININT,  BININT,  ERROR,   ERROR,   BININT,  ERROR,   ERROR,   ERROR,   ERROR,  ERROR,    ERROR,   INTEGER, INTEGER, ERROR,  ERROR,   INTEGER, ERROR,  ERROR,   ERROR,   INTEGER }, // State 5: BININT
+	{  REAL,    REAL,    REAL,    REAL,    REAL,    ERROR,   ERROR,   ERROR,   REAL,   REAL,     REAL,    ERROR,   ERROR,   ERROR,  REAL,    ERROR,   ERROR,  REAL,    ERROR,   REAL    }, // State 6: REAL
+	{  ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,  ERROR,    ERROR,   ERROR,   ERROR,   ERROR,  ERROR,   ERROR,   ERROR,  ERROR,   ERROR,   ERROR   }, // State 7: ERROR
+	{  HEXREAL, HEXREAL, HEXREAL, HEXREAL, HEXREAL, HEXREAL, HEXREAL, HEXREAL, HEXREAL, HEXREAL, HEXREAL, ERROR,   ERROR,   ERROR,  HEXREAL, ERROR,   ERROR,  HEXREAL, ERROR,   REAL    }, // State 8: HEXREAL
+};
+
+
+fn NumberState next_state(NumberState s, char c, bool eol = false)
+{
+	switch
+	{
+		case c == '0':             return transitions[s][0];
+		case c == '1':             return transitions[s][1];
+		case c >= '2' && c <= '7': return transitions[s][2];
+		case c >= '8' && c <= '9': return transitions[s][3];
+		case c == '_':             return transitions[s][4];
+		case c == 'a' || c == 'A': return transitions[s][5];
+		case c == 'b' || c == 'B': return transitions[s][6];
+		case c == 'c' || c == 'C': return transitions[s][7];
+		case c == 'd' || c == 'D': return transitions[s][8];
+		case c == 'e' || c == 'E': return transitions[s][9];
+		case c == 'f' || c == 'F': return transitions[s][10];
+		case c == 'i' || c == 'I': return transitions[s][11];
+		case c == 'l' || c == 'L': return transitions[s][12];
+		case c == 'o' || c == 'O': return transitions[s][13];
+		case c == 'p' || c == 'P': return transitions[s][14];
+		case c == 'u' || c == 'U': return transitions[s][15];
+		case c == 'x' || c == 'X': return transitions[s][16];
+		case c == '+' || c == '-': return transitions[s][17];
+		case c == '.':             return transitions[s][18];
+		case eol:                  return transitions[s][19];
+		default:                   return ERROR;
+	}
+}
+
+
+struct TestCase
+{
+	String      str;
+	NumberState want;
+}
+
+fn void test_number_state() @test
+{
+	TestCase[*] tests = {
+		{ .str  = "123",        .want = INTEGER },
+		{ .str  = "123ul",      .want = INTEGER },
+		{ .str  = "123i32",     .want = INTEGER },
+		{ .str  = "0xdeadbeeF", .want = INTEGER },
+		{ .str  = "0xcafeUL",   .want = INTEGER },
+		{ .str  = "0xbeeF.123", .want = REAL },
+		{ .str  = "0b1001.001", .want = ERROR },
+		{ .str  = "0b123",      .want = ERROR },
+		{ .str  = "0b101UL",    .want = INTEGER },
+		{ .str  = "123.0",      .want = REAL },
+		{ .str  = "123.0e-10",  .want = REAL },
+		{ .str  = "123f",       .want = REAL },
+		{ .str  = "123d",       .want = REAL },
+	};
+
+	foreach (tc: tests)
+	{
+		NumberState s = INIT;
+		foreach (c: tc.str) s = next_state(s, c);
+		s = next_state(s, 0, true);
+		assert(s == tc.want, "wrong state: got: %s, want: %s", s, tc.want);
+	}
+}
+
