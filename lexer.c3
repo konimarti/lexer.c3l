@@ -137,16 +137,10 @@ fn char? Lexer.advance(&self)
 
 fn bool Lexer.at_end(&self) => self.pos >= self.input.len;
 
-fn char Lexer.peek(&self)
+fn char Lexer.peek(&self, usz ahead = 0)
 {
-	if (self.at_end()) return 0;
-	return self.input[self.pos];
-}
-
-fn char Lexer.peek2(&self)
-{
-	if (self.pos + 1 >= self.input.len) return 0;
-	return self.input[self.pos + 1];
+	if (self.pos + ahead >= self.input.len) return 0;
+	return self.input[self.pos + ahead];
 }
 
 fn bool Lexer.must(&self, String s)
@@ -390,7 +384,11 @@ fn Token? Lexer.next(&self)
 		case '`':
 			self.scan_string()!;
 			return self.emit_token(STRING);
-		case '\n': self.advance()!; return self.emit_token(EOL);
+
+		case '\n':
+			self.advance()!;
+			return self.emit_token(EOL);
+
 		default:
 			if (is_digit(c)) return self.lex_number()!;
 			if (is_ident(c)) return self.lex_ident()!;
@@ -486,10 +484,10 @@ fn Token? Lexer.lex_number(&self)
 			c == 'i' || c == 'f' || c == 'd' || c == '_'))))
 	{
 		if ((c == '+' || c == '-') && (prev != 'e' && prev != 'E' && prev != 'p' && prev != 'P')) break;
-		if (c == '.' && self.peek2() == '.') break;
+		if (c == '.' && self.peek(1) == '.') break;
 		self.advance()!;
-		i++;
 		prev = c;
+		i++;
 	}
 
 	usz len = self.pos - self.token_start;
@@ -507,7 +505,7 @@ fn Token? Lexer.lex_attribute(&self)
 
 	usz len = self.pos - self.token_start;
 	String str = self.input[self.token_start:len];
-	return self.emit_token(classify(str, str[0]));
+	return self.emit_token(ident::classify(str, str[0]));
 }
 
 fn Token? Lexer.lex_ident(&self)
@@ -596,27 +594,9 @@ fn Token? Lexer.lex_ident(&self)
 		case "typeid":    return self.emit_token(TYPEID);
 
 		default:
-			return self.emit_token(classify(str));
+			return self.emit_token(ident::classify(str));
 	}
 }
-
-fn void test_classify_str() @test
-{
-	assert(classify("AABB") == CONST_IDENT);
-	assert(classify("Aabb") == TYPE_IDENT);
-	assert(classify("aabb") == IDENT);
-	assert(classify("aaBb") == IDENT);
-	assert(classify("@AABB", '@') == AT_CONST_IDENT);
-	assert(classify("@Aabb", '@') == AT_TYPE_IDENT);
-	assert(classify("@aabb", '@') == AT_IDENT);
-	assert(classify("#AABB", '#') == HASH_CONST_IDENT);
-	assert(classify("#Aabb", '#') == HASH_TYPE_IDENT);
-	assert(classify("#aabb", '#') == HASH_IDENT);
-	assert(classify("$AABB", '$') == CT_CONST_IDENT);
-	assert(classify("$Aabb", '$') == CT_TYPE_IDENT);
-	assert(classify("$aabb", '$') == CT_IDENT);
-}
-
 
 fn Token? Lexer.lex_compile_time(&self)
 {
@@ -677,7 +657,7 @@ fn Token? Lexer.lex_compile_time(&self)
 		case "$vatype":     return self.emit_token(CT_VATYPE);
 
 		default:
-			return self.emit_token(classify(str, str[0]));
+			return self.emit_token(ident::classify(str, str[0]));
 	}
 }
 
@@ -692,47 +672,7 @@ fn Token? Lexer.lex_hash_ident(&self)
 
 	usz len = self.pos - self.token_start;
 	String str = self.input[self.token_start:len];
-	return self.emit_token(classify(str, str[0]));
-}
-
-fn TokenType classify(String s, char prefix = 0)
-{
-	bool type_ident, const_ident, ident;
-	usz caps, nocaps, n;
-	n = s.len;
-	foreach (c : s)
-	{
-		switch
-		{
-			case c >= 'a' && c <= 'z': nocaps++;
-			case c >= 'A' && c <= 'Z': if (!nocaps) caps++;
-			case c == '_' || c == '$' || c == '#': n--;
-		}
-	}
-	type_ident  = n && caps && nocaps;
-	const_ident = n && caps && nocaps == 0;
-	ident       = n && caps == 0 && nocaps;
-	switch (prefix)
-	{
-		case '@':
-			if (type_ident)  return AT_TYPE_IDENT;
-			if (const_ident) return AT_CONST_IDENT;
-			if (ident)       return AT_IDENT;
-		case '#':
-			if (type_ident)  return HASH_TYPE_IDENT;
-			if (const_ident) return HASH_CONST_IDENT;
-			if (ident)       return HASH_IDENT;
-		case '$':
-			if (type_ident)  return CT_TYPE_IDENT;
-			if (const_ident) return CT_CONST_IDENT;
-			if (ident)       return CT_IDENT;
-		default:
-			if (type_ident)  return TYPE_IDENT;
-			if (const_ident) return CONST_IDENT;
-			if (ident)       return IDENT;
-			return IDENT;
-	}
-	return INVALID;
+	return self.emit_token(ident::classify(str, str[0]));
 }
 
 struct DocLexer
@@ -893,7 +833,7 @@ struct TestCase @private
 	NumberState want;
 }
 
-fn void test_number_state() @test
+fn void test_number_classify() @test
 {
 	TestCase[*] tests = {
 		{ .str  = "+",            .want = ERROR },
@@ -926,4 +866,64 @@ fn void test_number_state() @test
 		assert(s == tc.want, "wrong state (%s): got: %s, want: %s", tc.str, s, tc.want);
 	}
 }
+
+module c3::lexer::ident;
+
+fn TokenType classify(String s, char prefix = 0)
+{
+	bool type_ident, const_ident, ident;
+	usz caps, nocaps, n;
+	n = s.len;
+	foreach (c : s)
+	{
+		switch
+		{
+			case c >= 'a' && c <= 'z': nocaps++;
+			case c >= 'A' && c <= 'Z': if (!nocaps) caps++;
+			case c == '_' || c == '$' || c == '#': n--;
+		}
+	}
+	type_ident  = n && caps && nocaps;
+	const_ident = n && caps && nocaps == 0;
+	ident       = n && caps == 0 && nocaps;
+	switch (prefix)
+	{
+		case '@':
+			if (type_ident)  return AT_TYPE_IDENT;
+			if (const_ident) return AT_CONST_IDENT;
+			if (ident)       return AT_IDENT;
+		case '#':
+			if (type_ident)  return HASH_TYPE_IDENT;
+			if (const_ident) return HASH_CONST_IDENT;
+			if (ident)       return HASH_IDENT;
+		case '$':
+			if (type_ident)  return CT_TYPE_IDENT;
+			if (const_ident) return CT_CONST_IDENT;
+			if (ident)       return CT_IDENT;
+		default:
+			if (type_ident)  return TYPE_IDENT;
+			if (const_ident) return CONST_IDENT;
+			if (ident)       return IDENT;
+			return IDENT;
+	}
+	return INVALID;
+}
+
+fn void test_ident_classify() @test
+{
+	assert(classify("AABB") == CONST_IDENT);
+	assert(classify("Aabb") == TYPE_IDENT);
+	assert(classify("aabb") == IDENT);
+	assert(classify("aaBb") == IDENT);
+	assert(classify("@AABB", '@') == AT_CONST_IDENT);
+	assert(classify("@Aabb", '@') == AT_TYPE_IDENT);
+	assert(classify("@aabb", '@') == AT_IDENT);
+	assert(classify("#AABB", '#') == HASH_CONST_IDENT);
+	assert(classify("#Aabb", '#') == HASH_TYPE_IDENT);
+	assert(classify("#aabb", '#') == HASH_IDENT);
+	assert(classify("$AABB", '$') == CT_CONST_IDENT);
+	assert(classify("$Aabb", '$') == CT_TYPE_IDENT);
+	assert(classify("$aabb", '$') == CT_IDENT);
+}
+
 
