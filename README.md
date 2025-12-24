@@ -43,7 +43,7 @@ fn void main() => @pool()
 {
 	Lexer lexer;
 	lexer.init((String)file::load_temp($$FILE)!!);
-	while (try tok = lexer.next() && tok.type != EOF) io::printn(tok);
+	while (try tok = lexer.next()) io::printn(tok);
 }
 ```
 
