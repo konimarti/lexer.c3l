@@ -154,19 +154,25 @@ fn bool Lexer.must(&self, String s)
 	return false;
 }
 
+fn String Lexer.lexeme(&self)
+{
+	usz len = self.pos - self.token_start;
+	return self.input[self.token_start:len];
+}
+
 <*
  Emit token from lexer.
 *>
 fn Token Lexer.emit_token(&self, TokenType type)
 {
-	usz len = self.pos - self.token_start;
+	String lexeme = self.lexeme();
 	Token tok = {
 		.type      = type,
 		.offset    = self.token_start,
-		.len       = len,
+		.len       = lexeme.len,
 		.ln        = self.ln,
 		.col       = self.col,
-		.text      = self.input[self.token_start:len],
+		.text      = lexeme,
 		.nl_before = self.nl_before
 	};
 	self.nl_before = 0;
@@ -351,16 +357,25 @@ fn Token? Lexer.next(&self)
 			}
 			return self.emit_token(type);
 
-		case '$': return self.lex_compile_time()!;
-		case '@': return self.lex_attribute();
+		case '$':
+			switch
+			{
+				case self.must("$$"): return self.emit_token(BUILTIN);
+				case self.must("$"):  return self.lex_compile_time()!;
+				default: return INVALID_CHAR?;
+			}
+
+		case '@':
 		case '#':
 			switch
 			{
 				case self.must("#!"):
 					self.scan_line_comment()!;
 					return self.emit_token(LCOMMENT);
-				default:
-					return self.lex_hash_ident()!;
+				case self.must("#"):
+				case self.must("@"):
+					return self.lex_at_or_hash_ident()!;
+				default: return INVALID_CHAR?;
 			}
 
 		case 'b':
@@ -487,34 +502,18 @@ fn Token? Lexer.lex_number(&self)
 		i++;
 	}
 
-	usz len = self.pos - self.token_start;
-	String str = self.input[self.token_start:len];
-	return self.emit_token(number::classify(str));
-}
-
-fn Token? Lexer.lex_attribute(&self)
-{
-	char c;
-	while (!self.at_end() && (c = self.peek()) && (is_ident(c) || c == '@' ))
-	{
-		self.advance()!;
-	}
-
-	usz len = self.pos - self.token_start;
-	String str = self.input[self.token_start:len];
-	return self.emit_token(ident::classify(str));
+	return self.emit_token(number::classify(self.lexeme()));
 }
 
 fn Token? Lexer.lex_ident(&self)
 {
 	char c;
-	while ((c = self.peek()) && (is_ident(c)))
+	while (!self.at_end() && (c = self.peek()) && is_ident(c))
 	{
 		self.advance()!;
 	}
 
-	usz len = self.pos - self.token_start;
-	String str = self.input[self.token_start:len];
+	String str = self.lexeme();
 	switch (str)
 	{
 		// Top-Level Explicit Keywords
@@ -598,18 +597,12 @@ fn Token? Lexer.lex_ident(&self)
 fn Token? Lexer.lex_compile_time(&self)
 {
 	char c;
-	switch
-	{
-		case self.must("$$"): return self.emit_token(BUILTIN);
-		case self.must("$"): break;
-	}
 	while (!self.at_end() && (c = self.peek()) && is_ident(c))
 	{
 		self.advance()!;
 	}
 
-	usz len = self.pos - self.token_start;
-	String str = self.input[self.token_start:len];
+	String str = self.lexeme();
 	switch (str)
 	{
 		// Compile time
@@ -658,18 +651,15 @@ fn Token? Lexer.lex_compile_time(&self)
 	}
 }
 
-fn Token? Lexer.lex_hash_ident(&self)
+fn Token? Lexer.lex_at_or_hash_ident(&self)
 {
 	char c;
-	self.must("#");
 	while (!self.at_end() && (c = self.peek()) && is_ident(c))
 	{
 		self.advance()!;
 	}
 
-	usz len = self.pos - self.token_start;
-	String str = self.input[self.token_start:len];
-	return self.emit_token(ident::classify(str));
+	return self.emit_token(ident::classify(self.lexeme()));
 }
 
 struct ContractLexer
