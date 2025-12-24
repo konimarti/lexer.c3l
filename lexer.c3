@@ -494,7 +494,7 @@ fn Token? Lexer.lex_number(&self)
 
 	usz len = self.pos - self.token_start;
 	String str = self.input[self.token_start:len];
-	return self.emit_token(classify_number(str));
+	return self.emit_token(number::classify(str));
 }
 
 fn Token? Lexer.lex_attribute(&self)
@@ -803,7 +803,9 @@ fn void test_doc_lexer() @test
 	}
 }
 
-enum NumberState : const inline char
+module c3::lexer::number;
+
+enum NumberState : const inline char @private
 {
 	INIT    = 0,
 	INTEGER = 1,
@@ -816,7 +818,7 @@ enum NumberState : const inline char
 	HEXREAL = 8
 }
 
-NumberState[*][*] transitions = {
+NumberState[*][*] transitions @private = {
 	// Alphabet
 	// [0]      [1]      [2-7]    [8-9]    [_]      [aA]     [bB]     [cC]     [dD]    [eE]      [fF]     [iI]     [lL]     [oO]    [pP]     [uU]     [xX]    [+-]     [.]      [eof]
 	{  ZERO,    INTEGER, INTEGER, INTEGER, ERROR,   ERROR,   ERROR,   ERROR,   ERROR,  ERROR,    ERROR,   ERROR,   ERROR,   ERROR,  ERROR,   ERROR,   ERROR,  INIT,    ERROR,   ERROR   }, // State 0: INIT
@@ -860,7 +862,7 @@ fn NumberState next_state(NumberState s, char c, bool eol = false)
 }
 
 
-fn TokenType classify_number(String s)
+fn TokenType classify(String s)
 {
 	NumberState state = INIT;
 	foreach (c: s) state = next_state(state, c);
@@ -873,7 +875,7 @@ fn TokenType classify_number(String s)
 	}
 }
 
-struct TestCase
+struct TestCase @private
 {
 	String      str;
 	NumberState want;
