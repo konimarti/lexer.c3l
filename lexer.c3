@@ -4,7 +4,7 @@ import std::io;
 import std::collections::list;
 import std::ascii;
 
-faultdef INVALID_CHAR, CONTRACT_END;
+faultdef INVALID_CHAR;
 
 enum TokenType : ushort
 {
