@@ -52,7 +52,7 @@ enum TokenType : ushort
 	VOID, BOOL, CHAR, ICHAR, SHORT, USHORT, INT, UINT, LONG,
 	ULONG, INT128, UINT128, FLOAT, DOUBLE, FLOAT16, BFLOAT16,
 	FLOAT128, IPTR, UPTR, ISZ, USZ, FAULT, ANY, TYPEID,
-        CT_CONST_IDENT, CT_TYPE_IDENT, CT_IDENT,
+        CT_IDENT, CT_TYPE_IDENT, CT_CONST_IDENT,
 
 	CT_ALIGNOF, CT_ASSERT, CT_ASSIGNABLE, CT_CASE, CT_DEFAULT,
 	CT_DEFINED, CT_ECHO, CT_ELSE, CT_ENDFOR, CT_ENDFOREACH,
@@ -505,7 +505,7 @@ fn Token? Lexer.lex_attribute(&self)
 
 	usz len = self.pos - self.token_start;
 	String str = self.input[self.token_start:len];
-	return self.emit_token(ident::classify(str, str[0]));
+	return self.emit_token(ident::classify(str));
 }
 
 fn Token? Lexer.lex_ident(&self)
@@ -657,7 +657,7 @@ fn Token? Lexer.lex_compile_time(&self)
 		case "$vatype":     return self.emit_token(CT_VATYPE);
 
 		default:
-			return self.emit_token(ident::classify(str, str[0]));
+			return self.emit_token(ident::classify(str));
 	}
 }
 
@@ -672,17 +672,17 @@ fn Token? Lexer.lex_hash_ident(&self)
 
 	usz len = self.pos - self.token_start;
 	String str = self.input[self.token_start:len];
-	return self.emit_token(ident::classify(str, str[0]));
+	return self.emit_token(ident::classify(str));
 }
 
-struct DocLexer
+struct ContractLexer
 {
 	Splitter splitter;
 	Lexer    lexer;
 	bool     lexer_init;
 }
 
-fn DocLexer* DocLexer.init(&self, String doc_str)
+fn ContractLexer* ContractLexer.init(&self, String doc_str)
 {
 	*self = {
 		.splitter   = doc_str.strip("<*").strip_end("*>").tokenize_all("\n", true),
@@ -692,7 +692,7 @@ fn DocLexer* DocLexer.init(&self, String doc_str)
 	return self;
 }
 
-fn Token? DocLexer.next(&self)
+fn Token? ContractLexer.next(&self)
 {
 	if (!self.lexer_init)
 	{
@@ -715,7 +715,7 @@ fn Token? DocLexer.next(&self)
 
 fn void test_doc_lexer() @test
 {
-	DocLexer dl;
+	ContractLexer dl;
 	dl.init(`*
 		 Check if a character is in a set.
 
@@ -764,51 +764,50 @@ enum NumberState : const inline char @private
 	REALSUF = 14, // Real suffixes: d, f
 }
 
-NumberState[*][*] transitions @private = {
+const NumberState[*][*] TRANSITIONS @private = {
 	// Alphabet
-	// [0]      [1]      [2-7]    [8-9]    [_]      [aA]     [bB]     [cC]     [dD]     [eE]      [fF]     [i]      [lL]     [oO]    [pP]     [uU]     [xX]    [+-]     [.]      [eof]
-	{  ZERO,    INTEGER, INTEGER, INTEGER, ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,    ERROR,   ERROR,   ERROR,   ERROR,  ERROR,   ERROR,   ERROR,  INIT,    ERROR,   ERROR   }, // State 0:  INIT
-	{  INTEGER, INTEGER, INTEGER, INTEGER, INTEGER, ERROR,   ERROR,   ERROR,   REALSUF, SCINOT,   REALSUF, INTSUF,  INTSUF,  ERROR,  ERROR,   INTSUF,  ERROR,  ERROR,   INTDEC,  INTEGER }, // State 1:  INTEGER
-	{  INTEGER, INTEGER, INTEGER, INTEGER, INTEGER, ERROR,   BININT,  ERROR,   REALSUF, SCINOT,   REALSUF, INTSUF,  INTSUF,  OCTINT, ERROR,   INTSUF,  HEXINT, ERROR,   INTDEC,  INTEGER }, // State 2:  ZERO
-	{  HEXINT,  HEXINT,  HEXINT,  HEXINT,  HEXINT,  HEXINT,  HEXINT,  HEXINT,  HEXINT,  HEXINT,   HEXINT,  INTSUF,  INTSUF,  ERROR,  SCINOT,  INTSUF,  ERROR,  ERROR,   HEXDEC,  INTEGER }, // State 3:  HEXINT
-	{  OCTINT,  OCTINT,  OCTINT,  ERROR,   OCTINT,  ERROR,   ERROR,   ERROR,   ERROR,   ERROR,    ERROR,   INTSUF,  INTSUF,  ERROR,  ERROR,   INTSUF,  ERROR,  ERROR,   ERROR,   INTEGER }, // State 4:  OCTINT
-	{  BININT,  BININT,  ERROR,   ERROR,   BININT,  ERROR,   ERROR,   ERROR,   ERROR,   ERROR,    ERROR,   INTSUF,  INTSUF,  ERROR,  ERROR,   INTSUF,  ERROR,  ERROR,   ERROR,   INTEGER }, // State 5:  BININT
-	{  ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,    ERROR,   ERROR,   ERROR,   ERROR,  ERROR,   ERROR,   ERROR,  ERROR,   ERROR,   REAL    }, // State 6:  REAL
-	{  ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,    ERROR,   ERROR,   ERROR,   ERROR,  ERROR,   ERROR,   ERROR,  ERROR,   ERROR,   ERROR   }, // State 7:  ERROR
-	{  HEXDEC,  HEXDEC,  HEXDEC,  HEXDEC,  HEXDEC,  HEXDEC,  HEXDEC,  HEXDEC,  HEXDEC,  HEXDEC,   HEXDEC,  ERROR,   ERROR,   ERROR,  SCINOT,  ERROR,   ERROR,  ERROR,   ERROR,   ERROR   }, // State 8:  HEXDEC
-	{  INTDEC,  INTDEC,  INTDEC,  INTDEC,  INTDEC,  ERROR,   ERROR,   ERROR,   REALSUF, SCINOT,   REALSUF, ERROR,   ERROR,   ERROR,  ERROR,   ERROR,   ERROR,  ERROR,   ERROR,   REAL    }, // State 9:  INTDEC
-	{  EXP,     EXP,     EXP,     EXP,     ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,    ERROR,   ERROR,   ERROR,   ERROR,  ERROR,   ERROR,   ERROR,  EXPSIGN, ERROR,   ERROR   }, // State 10: SCINOT
-	{  EXP,     EXP,     EXP,     EXP,     ERROR,   ERROR,   ERROR,   ERROR,   REALSUF, ERROR,    REALSUF, ERROR,   ERROR,   ERROR,  ERROR,   ERROR,   ERROR,  ERROR,   ERROR,   REAL    }, // State 11: EXP
-	{  EXP,     EXP,     EXP,     EXP,     ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,    ERROR,   ERROR,   ERROR,   ERROR,  ERROR,   ERROR,   ERROR,  ERROR,   ERROR,   ERROR   }, // State 12: EXPSIGN
-	{  ERROR,   INTSUF,  INTSUF,  INTSUF,  ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,    ERROR,   ERROR,   INTSUF,  ERROR,  ERROR,   ERROR,   ERROR,  ERROR,   ERROR,   INTEGER }, // State 13: INTSUF
-	{  ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,    ERROR,   ERROR,   ERROR,   ERROR,  ERROR,   ERROR,   ERROR,  ERROR,   ERROR,   REAL    }, // State 14: REALSUF
+	// [0]      [1]      [2-7]    [8-9]    [_]      [aA]     [bB]     [cC]     [dD]     [eE]      [fF]     [i]      [lL]     [oO]    [pP]     [uU]     [xX]    [+-]     [.]
+	{  ZERO,    INTEGER, INTEGER, INTEGER, ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,    ERROR,   ERROR,   ERROR,   ERROR,  ERROR,   ERROR,   ERROR,  INIT,    ERROR  }, // State 0:  INIT
+	{  INTEGER, INTEGER, INTEGER, INTEGER, INTEGER, ERROR,   ERROR,   ERROR,   REALSUF, SCINOT,   REALSUF, INTSUF,  INTSUF,  ERROR,  ERROR,   INTSUF,  ERROR,  ERROR,   INTDEC }, // State 1:  INTEGER
+	{  INTEGER, INTEGER, INTEGER, INTEGER, INTEGER, ERROR,   BININT,  ERROR,   REALSUF, SCINOT,   REALSUF, INTSUF,  INTSUF,  OCTINT, ERROR,   INTSUF,  HEXINT, ERROR,   INTDEC }, // State 2:  ZERO
+	{  HEXINT,  HEXINT,  HEXINT,  HEXINT,  HEXINT,  HEXINT,  HEXINT,  HEXINT,  HEXINT,  HEXINT,   HEXINT,  INTSUF,  INTSUF,  ERROR,  SCINOT,  INTSUF,  ERROR,  ERROR,   HEXDEC }, // State 3:  HEXINT
+	{  OCTINT,  OCTINT,  OCTINT,  ERROR,   OCTINT,  ERROR,   ERROR,   ERROR,   ERROR,   ERROR,    ERROR,   INTSUF,  INTSUF,  ERROR,  ERROR,   INTSUF,  ERROR,  ERROR,   ERROR  }, // State 4:  OCTINT
+	{  BININT,  BININT,  ERROR,   ERROR,   BININT,  ERROR,   ERROR,   ERROR,   ERROR,   ERROR,    ERROR,   INTSUF,  INTSUF,  ERROR,  ERROR,   INTSUF,  ERROR,  ERROR,   ERROR  }, // State 5:  BININT
+	{  ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,    ERROR,   ERROR,   ERROR,   ERROR,  ERROR,   ERROR,   ERROR,  ERROR,   ERROR  }, // State 6:  REAL
+	{  ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,    ERROR,   ERROR,   ERROR,   ERROR,  ERROR,   ERROR,   ERROR,  ERROR,   ERROR  }, // State 7:  ERROR
+	{  HEXDEC,  HEXDEC,  HEXDEC,  HEXDEC,  HEXDEC,  HEXDEC,  HEXDEC,  HEXDEC,  HEXDEC,  HEXDEC,   HEXDEC,  ERROR,   ERROR,   ERROR,  SCINOT,  ERROR,   ERROR,  ERROR,   ERROR  }, // State 8:  HEXDEC
+	{  INTDEC,  INTDEC,  INTDEC,  INTDEC,  INTDEC,  ERROR,   ERROR,   ERROR,   REALSUF, SCINOT,   REALSUF, ERROR,   ERROR,   ERROR,  ERROR,   ERROR,   ERROR,  ERROR,   ERROR  }, // State 9:  INTDEC
+	{  EXP,     EXP,     EXP,     EXP,     ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,    ERROR,   ERROR,   ERROR,   ERROR,  ERROR,   ERROR,   ERROR,  EXPSIGN, ERROR  }, // State 10: SCINOT
+	{  EXP,     EXP,     EXP,     EXP,     ERROR,   ERROR,   ERROR,   ERROR,   REALSUF, ERROR,    REALSUF, ERROR,   ERROR,   ERROR,  ERROR,   ERROR,   ERROR,  ERROR,   ERROR  }, // State 11: EXP
+	{  EXP,     EXP,     EXP,     EXP,     ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,    ERROR,   ERROR,   ERROR,   ERROR,  ERROR,   ERROR,   ERROR,  ERROR,   ERROR  }, // State 12: EXPSIGN
+	{  ERROR,   INTSUF,  INTSUF,  INTSUF,  ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,    ERROR,   ERROR,   INTSUF,  ERROR,  ERROR,   ERROR,   ERROR,  ERROR,   ERROR  }, // State 13: INTSUF
+	{  ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,   ERROR,    ERROR,   ERROR,   ERROR,   ERROR,  ERROR,   ERROR,   ERROR,  ERROR,   ERROR  }, // State 14: REALSUF
 };
 
 
-fn NumberState next_state(NumberState s, char c)
+fn NumberState next_state(NumberState s, char c) @inline @private
 {
 	switch
 	{
-		case c == '0':             return transitions[s][0];
-		case c == '1':             return transitions[s][1];
-		case c >= '2' && c <= '7': return transitions[s][2];
-		case c >= '8' && c <= '9': return transitions[s][3];
-		case c == '_':             return transitions[s][4];
-		case c == 'a' || c == 'A': return transitions[s][5];
-		case c == 'b' || c == 'B': return transitions[s][6];
-		case c == 'c' || c == 'C': return transitions[s][7];
-		case c == 'd' || c == 'D': return transitions[s][8];
-		case c == 'e' || c == 'E': return transitions[s][9];
-		case c == 'f' || c == 'F': return transitions[s][10];
-		case c == 'i':             return transitions[s][11];
-		case c == 'l' || c == 'L': return transitions[s][12];
-		case c == 'o' || c == 'O': return transitions[s][13];
-		case c == 'p' || c == 'P': return transitions[s][14];
-		case c == 'u' || c == 'U': return transitions[s][15];
-		case c == 'x' || c == 'X': return transitions[s][16];
-		case c == '+' || c == '-': return transitions[s][17];
-		case c == '.':             return transitions[s][18];
-		case c == 0:               return transitions[s][19]; // EOL
+		case c == '0':             return TRANSITIONS[s][0];
+		case c == '1':             return TRANSITIONS[s][1];
+		case c >= '2' && c <= '7': return TRANSITIONS[s][2];
+		case c >= '8' && c <= '9': return TRANSITIONS[s][3];
+		case c == '_':             return TRANSITIONS[s][4];
+		case c == 'a' || c == 'A': return TRANSITIONS[s][5];
+		case c == 'b' || c == 'B': return TRANSITIONS[s][6];
+		case c == 'c' || c == 'C': return TRANSITIONS[s][7];
+		case c == 'd' || c == 'D': return TRANSITIONS[s][8];
+		case c == 'e' || c == 'E': return TRANSITIONS[s][9];
+		case c == 'f' || c == 'F': return TRANSITIONS[s][10];
+		case c == 'i':             return TRANSITIONS[s][11];
+		case c == 'l' || c == 'L': return TRANSITIONS[s][12];
+		case c == 'o' || c == 'O': return TRANSITIONS[s][13];
+		case c == 'p' || c == 'P': return TRANSITIONS[s][14];
+		case c == 'u' || c == 'U': return TRANSITIONS[s][15];
+		case c == 'x' || c == 'X': return TRANSITIONS[s][16];
+		case c == '+' || c == '-': return TRANSITIONS[s][17];
+		case c == '.':             return TRANSITIONS[s][18];
 		default:                   return ERROR;
 	}
 }
@@ -818,93 +817,99 @@ fn TokenType classify(String s)
 {
 	NumberState state = INIT;
 	foreach (c: s) state = next_state(state, c);
-	state = next_state(state, 0);
 	switch (state)
 	{
-		case INTEGER: return TokenType.INTEGER;
-		case REAL:    return TokenType.REAL;
-		default:      return TokenType.INVALID;
+		case ZERO:
+		case HEXINT:
+		case OCTINT:
+		case BININT:
+		case INTSUF:
+		case INTEGER:
+			return TokenType.INTEGER;
+		case INTDEC:
+		case EXP:
+		case REALSUF:
+		case REAL:
+			return TokenType.REAL;
+		default:
+			return TokenType.INVALID;
 	}
-}
-
-struct TestCase @private
-{
-	String      str;
-	NumberState want;
 }
 
 fn void test_number_classify() @test
 {
-	TestCase[*] tests = {
-		{ .str  = "+",            .want = ERROR },
-		{ .str  = "-",            .want = ERROR },
-		{ .str  = "0",            .want = INTEGER },
-		{ .str  = "-1",           .want = INTEGER },
-		{ .str  = "123",          .want = INTEGER },
-		{ .str  = "123ul",        .want = INTEGER },
-		{ .str  = "123i32",       .want = INTEGER },
-		{ .str  = "0xdeadbeeF",   .want = INTEGER },
-		{ .str  = "0xcafeUL",     .want = INTEGER },
-		{ .str  = "0b101UL",      .want = INTEGER },
-		{ .str  = "1xbeef",       .want = ERROR },
-		{ .str  = "0b1001.001",   .want = ERROR },
-		{ .str  = "0b123",        .want = ERROR },
-		{ .str  = "0xbeeF.123p1", .want = REAL },
-		{ .str  = "0f",           .want = REAL },
-		{ .str  = "0.5f",         .want = REAL },
-		{ .str  = "123.0",        .want = REAL },
-		{ .str  = "123.0e-10",    .want = REAL },
-		{ .str  = "123f",         .want = REAL },
-		{ .str  = "123d",         .want = REAL },
-	};
-
-	foreach (tc: tests)
-	{
-		NumberState s = INIT;
-		foreach (c: tc.str) s = next_state(s, c);
-		s = next_state(s, 0);
-		assert(s == tc.want, "wrong state (%s): got: %s, want: %s", tc.str, s, tc.want);
-	}
+	assert(classify("+")          ==  INVALID  );
+	assert(classify("-")          ==  INVALID  );
+	assert(classify("0")          ==  INTEGER  );
+	assert(classify("-1")         ==  INTEGER  );
+	assert(classify("123")        ==  INTEGER  );
+	assert(classify("123ul")      ==  INTEGER  );
+	assert(classify("123i32")     ==  INTEGER  );
+	assert(classify("0xdeadbeeF") ==  INTEGER  );
+	assert(classify("0xcafeUL")   ==  INTEGER  );
+	assert(classify("0b101UL")    ==  INTEGER  );
+	assert(classify("1xbeef")     ==  INVALID  );
+	assert(classify("0b1001.001") ==  INVALID  );
+	assert(classify("0b123")      ==  INVALID  );
+	assert(classify("0xbeeF.123p1") == REAL   );
+	assert(classify("0f")         ==   REAL );
+	assert(classify("0.5f")       ==   REAL );
+	assert(classify("123.0")      ==   REAL );
+	assert(classify("123.0e-10")  ==   REAL );
+	assert(classify("123f")       ==   REAL );
+	assert(classify("123d")       ==   REAL );
 }
 
 module c3::lexer::ident;
 
-fn TokenType classify(String s, char prefix = 0)
+enum IdentState : const inline char @private {
+	INIT_STATE  = 0,
+	IDENT_STATE = 1,
+	TYPE_STATE  = 2,
+	CONST_STATE = 3,
+	ERROR_STATE = 4,
+}
+
+bool[5] accepting_states @private = { false, true, true, true, false };
+
+const IdentState[*][*] TRANSITIONS @private = {
+	// Alphabet
+	// [A-Z]        [a-z]        [0-9]        '_'          [$#@]
+	{  CONST_STATE, IDENT_STATE, ERROR_STATE, INIT_STATE,  INIT_STATE  }, // State 0: INIT_STATE
+	{  IDENT_STATE, IDENT_STATE, IDENT_STATE, IDENT_STATE, ERROR_STATE }, // State 1: IDENT_STATE
+	{  TYPE_STATE,  TYPE_STATE,  TYPE_STATE,  TYPE_STATE,  ERROR_STATE }, // State 2: TYPE_STATE
+	{  CONST_STATE, TYPE_STATE,  CONST_STATE, CONST_STATE, ERROR_STATE }, // State 3: CONST_STATE
+	{  ERROR_STATE, ERROR_STATE, ERROR_STATE, ERROR_STATE, ERROR_STATE }, // State 4: ERROR_STATE
+};
+
+fn IdentState next_state(IdentState state, char c) @inline @private
 {
-	bool type_ident, const_ident, ident;
-	usz caps, nocaps, n;
-	n = s.len;
-	foreach (c : s)
+	switch
 	{
-		switch
-		{
-			case c >= 'a' && c <= 'z': nocaps++;
-			case c >= 'A' && c <= 'Z': if (!nocaps) caps++;
-			case c == '_' || c == '$' || c == '#': n--;
-		}
+	case c >= 'A' && c <= 'Z': return TRANSITIONS[state][0];
+	case c >= 'a' && c <= 'z': return TRANSITIONS[state][1];
+	case c >= '0' && c <= '9': return TRANSITIONS[state][2];
+	case c == '_':             return TRANSITIONS[state][3];
+	case c == '$' || c == '#' || c == '@':
+				   return TRANSITIONS[state][4];
+	default:                   return ERROR_STATE;
 	}
-	type_ident  = n && caps && nocaps;
-	const_ident = n && caps && nocaps == 0;
-	ident       = n && caps == 0 && nocaps;
-	switch (prefix)
+}
+
+fn TokenType classify(String s)
+{
+	IdentState state = IdentState.INIT_STATE;
+	foreach (c: s) state = next_state(state, c);
+	if (accepting_states[state])
 	{
-		case '@':
-			if (type_ident)  return AT_TYPE_IDENT;
-			if (const_ident) return AT_CONST_IDENT;
-			if (ident)       return AT_IDENT;
-		case '#':
-			if (type_ident)  return HASH_TYPE_IDENT;
-			if (const_ident) return HASH_CONST_IDENT;
-			if (ident)       return HASH_IDENT;
-		case '$':
-			if (type_ident)  return CT_TYPE_IDENT;
-			if (const_ident) return CT_CONST_IDENT;
-			if (ident)       return CT_IDENT;
-		default:
-			if (type_ident)  return TYPE_IDENT;
-			if (const_ident) return CONST_IDENT;
-			if (ident)       return IDENT;
-			return IDENT;
+		ushort offset = (ushort)state - 1;
+		switch (s[0])
+		{
+		case '$': return offset + TokenType.CT_IDENT;
+		case '#': return offset + TokenType.HASH_IDENT;
+		case '@': return offset + TokenType.AT_IDENT;
+		default:  return offset + TokenType.IDENT;
+		}
 	}
 	return INVALID;
 }
@@ -915,15 +920,15 @@ fn void test_ident_classify() @test
 	assert(classify("Aabb") == TYPE_IDENT);
 	assert(classify("aabb") == IDENT);
 	assert(classify("aaBb") == IDENT);
-	assert(classify("@AABB", '@') == AT_CONST_IDENT);
-	assert(classify("@Aabb", '@') == AT_TYPE_IDENT);
-	assert(classify("@aabb", '@') == AT_IDENT);
-	assert(classify("#AABB", '#') == HASH_CONST_IDENT);
-	assert(classify("#Aabb", '#') == HASH_TYPE_IDENT);
-	assert(classify("#aabb", '#') == HASH_IDENT);
-	assert(classify("$AABB", '$') == CT_CONST_IDENT);
-	assert(classify("$Aabb", '$') == CT_TYPE_IDENT);
-	assert(classify("$aabb", '$') == CT_IDENT);
+	assert(classify("@AABB") == AT_CONST_IDENT);
+	assert(classify("@Aabb") == AT_TYPE_IDENT);
+	assert(classify("@aabb") == AT_IDENT);
+	assert(classify("#AABB") == HASH_CONST_IDENT);
+	assert(classify("#Aabb") == HASH_TYPE_IDENT);
+	assert(classify("#aabb") == HASH_IDENT);
+	assert(classify("$AABB") == CT_CONST_IDENT);
+	assert(classify("$Aabb") == CT_TYPE_IDENT);
+	assert(classify("$aabb") == CT_IDENT);
 }
 
 

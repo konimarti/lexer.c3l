@@ -1,12 +1,19 @@
 <*
- Validates the c3::lexer with the lexer in the c3c compiler.
+ `lexv` validates the c3::lexer with the lexer in the c3c compiler.
  Expects the output of `c3c -E` on stdin.
 
  The output from `c3c -E` contains two lines per file. The first line starts
  with '#' and contains the file that is being lexed. The second line are the
  tokens separate by a whitespace character(' ').
 
- Usage: c3c -E lexer.c3 | lexv
+ Usage:
+ 	c3c -E lexer.c3 | lexv
+
+ `lexv` can als be used to lex any other c3 file by providing the path to the
+ file as an argument.
+
+ Usage:
+	lexv <file(s)>
 *>
 module lexv;
 
@@ -90,7 +97,7 @@ fn bool? validate(String filename, String tokens, bool print_only = false) => @p
 			case CONTRACT:
 				DString buf2 = dstring::temp("<* ");
 
-				DocLexer dl;
+				ContractLexer dl;
 				dl.init(tok.text);
 				while (try doctok = dl.next())
 				{
