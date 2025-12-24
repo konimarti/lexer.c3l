@@ -12,7 +12,7 @@ echo "Using the C3 standard libary in: ${stdlib}"
 # Collect all files from the C3 standard library and unit tests.
 files=()
 files+=( $(find ${stdlib} -name "*.c3") )
-files+=( $(find ${stdlib}/../test/unit -name "*.c3" ! -name expected_directive.c3 ! -name parse_hex_float.c3 ! -name bad_bitwidth.c3) )
+files+=( $(find ${stdlib}/../test/unit -name "*.c3") )
 
 # Run the validation against the `c3c` compiler lexical output.
 c3c -E compile-only ${files[@]} | build/lexv
