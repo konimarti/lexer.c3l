@@ -475,16 +475,13 @@ fn Token? Lexer.lex_number(&self)
 {
 	char c, prev;
 	int i = 0;
-	while (!self.at_end() && (c = self.peek()) && (is_digit(c) || c == '-' ||
-		(i > 0 && (ascii::is_xdigit(c) || ascii::is_bdigit(c) || ascii::is_odigit(c) ||
-		        c == '.' || c == 'e' || c == 'E' || c == '+' ||
-			c == 'b' || c == 'B' || c == 'x' || c == 'X' ||
-			c == 'o' || c == 'O' || c == 'p' || c == 'P' ||
-			c == 'u' || c == 'U' || c == 'l' || c == 'L' ||
-			c == 'i' || c == 'f' || c == 'd' || c == '_'))))
+	while (!self.at_end() && (c = self.peek())
+		&& (is_digit(c) || c == '-' || (i > 0 && (ascii::is_xdigit(c) || ascii::is_bdigit(c) || ascii::is_odigit(c)
+			|| "+.eEpPbBxXoOuUlLifd_".contains_char(c))))
+	)
 	{
-		if ((c == '+' || c == '-') && (prev != 'e' && prev != 'E' && prev != 'p' && prev != 'P')) break;
-		if (c == '.' && self.peek(1) == '.') break;
+		if ("+-".contains_char(c) && !("eEpP".contains_char(prev))) break;
+		if (c == '.' && c == self.peek(1)) break;
 		self.advance()!;
 		prev = c;
 		i++;
