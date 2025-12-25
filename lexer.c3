@@ -4,7 +4,7 @@ import std::io, std::ascii;
 
 faultdef INVALID_CHAR;
 
-enum TokenType : ushort
+enum TokenType : inline ushort
 {
 	INVALID,
 
