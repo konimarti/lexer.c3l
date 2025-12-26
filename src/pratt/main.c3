@@ -116,8 +116,12 @@ struct Parselet
 }
 
 Parselet[*] pratt_table = {
-	[TokenType.STRING..TokenType.HASH_CONST_IDENT] =
-	                      { &parse_ident,  null,           0,  0, Assoc.NONE },
+	[TokenType.LESS..TokenType.CT_OR_OP]
+	                    = { null,          &parse_binary,  0,  5, Assoc.LEFT },
+	[TokenType.EQ..TokenType.CT_CONCAT_ASSIGN]
+	                    = { null,          &parse_assign,  0, 10, Assoc.RIGHT },
+	[TokenType.STRING..TokenType.CT_CONST_IDENT]
+	                    = { &parse_ident,  null,           0,  0, Assoc.NONE },
 	[TokenType.INTEGER] = { &parse_number, null,           0,  0, Assoc.NONE },
 	[TokenType.REAL]    = { &parse_number, null,           0,  0, Assoc.NONE },
 	[TokenType.PLUS]    = { &parse_unary,  &parse_binary, 60, 30, Assoc.LEFT },
@@ -156,7 +160,7 @@ fn Expr*? parse_group(PrattParser *p, Token tok)
 fn Expr*? parse_unary(PrattParser *p, Token tok)
 {
 	Parselet parselet = pratt_table[tok.type];
-	int next_bp = parselet.prefix_bp + parselet.assoc;
+	int next_bp = parselet.prefix_bp;
 
 	Expr* right = parse_expr(p, next_bp)!;
 
@@ -166,12 +170,31 @@ fn Expr*? parse_unary(PrattParser *p, Token tok)
 	return e;
 }
 
+fn Expr*? parse_assign(PrattParser *p, Expr *left, Token tok)
+{
+	assert(left.kind == IDENT_EXPR,
+		"Left-hand side of assignment needs to be a name");
+
+	Parselet parselet = pratt_table[tok.type];
+
+	// If operator is right-associated, decrease binding power by one.
+	int next_bp = parselet.infix_bp - (parselet.assoc == Assoc.RIGHT ? 1 : 0);
+
+	Expr* right = parse_expr(p, next_bp)!;
+
+	Expr *e = mem::tnew(Expr);
+	*e = { .kind = ASSIGN_EXPR, .as.a = { left.as.i, right} };
+
+	return e;
+}
+
+
 fn Expr*? parse_binary(PrattParser *p, Expr *left, Token tok)
 {
 	Parselet parselet = pratt_table[tok.type];
 
-	// If operator is left-associated, add 1 to binding power.
-	int next_bp = parselet.infix_bp + parselet.assoc;
+	// If operator is right-associated, decrease binding power by one.
+	int next_bp = parselet.infix_bp - (parselet.assoc == Assoc.RIGHT ? 1 : 0);
 
 	Expr* right = parse_expr(p, next_bp)!;
 
@@ -215,7 +238,6 @@ fn Expr*? parse_call(PrattParser *p, Expr *left, Token tok)
 }
 
 
-
 /*
  Expressions
 */
@@ -224,6 +246,12 @@ alias NumberExpression = Token;
 alias IdentExpression = Token;
 
 struct UnaryExpression
+{
+	Token op;
+	Expr *right;
+}
+
+struct AssignExpression
 {
 	Token op;
 	Expr *right;
@@ -250,6 +278,7 @@ enum ExprKind
 	UNARY_EXPR,
 
 	// Infix Parselets
+	ASSIGN_EXPR,
 	BINARY_EXPR,
 	CALL_EXPR,
 }
@@ -260,8 +289,9 @@ struct Expr (Printable)
 	union as {
 		NumberExpression n;
 		IdentExpression  i;
-		UnaryExpression  u;
-		BinaryExpression b;
+		UnaryExpression  u; // Prefix expressions
+		AssignExpression a;
+		BinaryExpression b; // Infix expressions
 		CallExpression   c;
 	}
 }
@@ -274,6 +304,7 @@ fn usz? Expr.to_format(&self, Formatter *f) @dynamic
 		case NUMBER_EXPR: n += f.printf("%s", self.as.n)!;
 		case IDENT_EXPR:  n += f.printf("%s", self.as.i)!;
 		case UNARY_EXPR:  n += f.printf("( %s %s )", self.as.u.op, self.as.u.right)!;
+		case ASSIGN_EXPR: n += f.printf("( %s = %s )", self.as.a.op, self.as.a.right)!;
 		case BINARY_EXPR: n += f.printf("( %s %s %s )", self.as.b.left, self.as.b.op, self.as.b.right)!;
 		case CALL_EXPR:   n += f.printf("%s( %s )", self.as.c.func, self.as.c.args)!;
 	}
