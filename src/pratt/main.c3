@@ -1,6 +1,6 @@
 module pratt;
 
-import std::io;
+import std::io, std::collections::list;
 import c3::lexer;
 
 fn void print_repl() @inline
@@ -117,14 +117,14 @@ struct Parselet
 
 Parselet[*] pratt_table = {
 	[TokenType.STRING..TokenType.HASH_CONST_IDENT] =
-	                      { &parse_ident,           null,  0,  0, Assoc.NONE },
-	[TokenType.INTEGER] = { &parse_number,          null,  0,  0, Assoc.NONE },
-	[TokenType.REAL]    = { &parse_number,          null,  0,  0, Assoc.NONE },
+	                      { &parse_ident,  null,           0,  0, Assoc.NONE },
+	[TokenType.INTEGER] = { &parse_number, null,           0,  0, Assoc.NONE },
+	[TokenType.REAL]    = { &parse_number, null,           0,  0, Assoc.NONE },
 	[TokenType.PLUS]    = { &parse_unary,  &parse_binary, 60, 30, Assoc.LEFT },
 	[TokenType.MINUS]   = { &parse_unary,  &parse_binary, 60, 30, Assoc.LEFT },
 	[TokenType.STAR]    = { null,          &parse_binary,  0, 40, Assoc.LEFT },
 	[TokenType.DIV]     = { null,          &parse_binary,  0, 40, Assoc.LEFT },
-	[TokenType.LPAREN]  = { &parse_group,           null,  0,  0, Assoc.LEFT },
+	[TokenType.LPAREN]  = { &parse_group,  &parse_call,    0, 80, Assoc.LEFT },
 	[TokenType.EOF]     = {},
 };
 
@@ -181,6 +181,40 @@ fn Expr*? parse_binary(PrattParser *p, Expr *left, Token tok)
 	return e;
 }
 
+fn Expr*? parse_call(PrattParser *p, Expr *left, Token tok)
+{
+	// `args` will be the comma-separated arguments
+	List{Expr*} args;
+	args.tinit(); // TODO: Allocator?
+
+	// There might be no arguments
+	if (!p.match(TokenType.RPAREN))
+	{
+		do {
+			if (try arg = parse_expr(p, 0))
+			{
+				args.push(arg);
+			}
+			else
+			{
+				break;
+			}
+		} while (p.match(TokenType.COMMA));
+	}
+
+	if (!p.match(TokenType.RPAREN))
+	{
+		// TODO: Better throw error than abort
+		abort("Unclosed parenthesis");
+	}
+
+	Expr *e = mem::tnew(Expr);
+	*e = { .kind = CALL_EXPR, .as.c = { left, args} };
+
+	return e;
+}
+
+
 
 /*
  Expressions
@@ -202,12 +236,22 @@ struct BinaryExpression
 	Expr *right;
 }
 
+struct CallExpression
+{
+	Expr*       func;
+	List{Expr*} args;
+}
+
 enum ExprKind
 {
+	// Prefix Parselets
 	NUMBER_EXPR,
 	IDENT_EXPR,
 	UNARY_EXPR,
-	BINARY_EXPR
+
+	// Infix Parselets
+	BINARY_EXPR,
+	CALL_EXPR,
 }
 
 struct Expr (Printable)
@@ -218,6 +262,7 @@ struct Expr (Printable)
 		IdentExpression  i;
 		UnaryExpression  u;
 		BinaryExpression b;
+		CallExpression   c;
 	}
 }
 
@@ -230,6 +275,7 @@ fn usz? Expr.to_format(&self, Formatter *f) @dynamic
 		case IDENT_EXPR:  n += f.printf("%s", self.as.i)!;
 		case UNARY_EXPR:  n += f.printf("( %s %s )", self.as.u.op, self.as.u.right)!;
 		case BINARY_EXPR: n += f.printf("( %s %s %s )", self.as.b.left, self.as.b.op, self.as.b.right)!;
+		case CALL_EXPR:   n += f.printf("%s( %s )", self.as.c.func, self.as.c.args)!;
 	}
 	return n;
 }
