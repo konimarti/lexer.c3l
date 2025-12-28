@@ -47,7 +47,7 @@ enum TokenType : inline ushort
 	ALIAS, ASM, ASSERT, ATTRDEF, BITSTRUCT, CONST, ENUM, FAULTDEF, FUNC,
 	IMPORT, INTERFACE, MACRO, MODULE, STRUCT, UNION, TYPEDEF, BREAK, CASE,
 	CATCH, CONTINUE, DEFAULT, DEFER, DO, ELSE, EXTERN, FALSE, FOR, FOREACH,
-	FOREACH_R, IF, INLINE, LENGTHOF, NEXTCASE, NUL, RETURN, STATIC, SWITCH,
+	FOREACH_R, IF, INLINE, LENGTHOF, NEXTCASE, NULL, RETURN, STATIC, SWITCH,
 	TLOCAL, TRUE, TRY, VAR, WHILE,
 
 	CT_ALIGNOF, CT_ASSERT, CT_ASSIGNABLE, CT_CASE, CT_DEFAULT, CT_DEFINED,
@@ -546,7 +546,7 @@ fn Token? Lexer.lex_ident(&self)
 		case "if":        return self.emit_token(IF);
 		case "lengthof":  return self.emit_token(LENGTHOF);
 		case "nextcase":  return self.emit_token(NEXTCASE);
-		case "null":      return self.emit_token(NUL);
+		case "null":      return self.emit_token(NULL);
 		case "return":    return self.emit_token(RETURN);
 		case "static":    return self.emit_token(STATIC);
 		case "switch":    return self.emit_token(SWITCH);

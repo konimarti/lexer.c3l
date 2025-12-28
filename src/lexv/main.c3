@@ -245,7 +245,7 @@ fn String token_to_string(Token tok, bool doc_mode = false)
 	case INLINE: return tok.text;
 	case LENGTHOF: return tok.text;
 	case NEXTCASE: return tok.text;
-	case NUL: return tok.text;
+	case NULL: return tok.text;
 	case RETURN: return doc_mode ? "IDENT" : tok.text;
 	case STATIC: return tok.text;
 	case SWITCH: return tok.text;

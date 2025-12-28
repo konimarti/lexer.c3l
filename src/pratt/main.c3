@@ -221,7 +221,7 @@ Parselet[*] pratt_table = {
 	// [TokenType.BYTES]            = { &parse_bytes,            null,                    NONE,           Assoc.NONE  },
 	[TokenType.TRUE]             = { &parse_bool,             null,                    Precedence.NONE,           Assoc.NONE  },
 	[TokenType.FALSE]            = { &parse_bool,             null,                    Precedence.NONE,           Assoc.NONE  },
-	// [TokenType.NUL]              = { &parse_null,             null,                    NONE,           Assoc.NONE  },
+	[TokenType.NULL]              = { &parse_null,             null,                    Precedence.NONE,           Assoc.NONE  },
 	// [TokenType.LENGTHOF]         = { &parse_lengthof,         null,                    NONE,           Assoc.NONE  },
 	[TokenType.INTEGER]          = { &parse_integer,          null,                    Precedence.NONE,           Assoc.NONE  },
 	[TokenType.REAL]             = { &parse_double,           null,                    Precedence.NONE,           Assoc.NONE  },
@@ -268,6 +268,15 @@ fn Expr*? parse_bool(PrattParser *p, Token tok)
 	*e = { .kind = EXPR_CONST, .as.const_expr = const_expr };
 	return e;
 }
+
+fn Expr*? parse_null(PrattParser *p, Token tok)
+{
+	ExprConst const_expr = { .const_kind = ConstKind.CONST_POINTER, .ptr = 0 };
+	Expr *e = mem::tnew(Expr);
+	*e = { .kind = EXPR_CONST, .as.const_expr = const_expr };
+	return e;
+}
+
 
 fn Expr*? parse_ident(PrattParser *p, Token tok)
 {
@@ -448,6 +457,7 @@ enum ConstKind
 	CONST_FLOAT,
 	CONST_INTEGER,
 	CONST_BOOL,
+	CONST_POINTER,
 }
 
 struct ExprConst (Printable)
@@ -458,6 +468,7 @@ struct ExprConst (Printable)
 		Token fxx;
 		Token ixx;
 		bool  b;
+		uptr  ptr;
 	}
 }
 
@@ -469,6 +480,7 @@ fn usz? ExprConst.to_format(&self, Formatter *f) @dynamic
 		case CONST_FLOAT:   n += f.printf("%s", self.fxx)!;
 		case CONST_INTEGER: n += f.printf("%s", self.ixx)!;
 		case CONST_BOOL   : n += f.printf("<%s>", self.b)!;
+		case CONST_POINTER: n += f.printf("%s", self.ptr == 0 ? null : (void*)self.ptr)!;
 	}
 	return n;
 }
