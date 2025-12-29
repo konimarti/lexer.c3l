@@ -218,10 +218,10 @@ Parselet[*] pratt_table = {
 	// [TokenType.FIRST_KEYWORD..T  okenType.FIRST_NON_TYPE_KEYWORD]
 	//                              = { &parse_type_ident,       null,                    NONE,           Assoc.NONE  },
 
-	// [TokenType.BYTES]            = { &parse_bytes,            null,                    NONE,           Assoc.NONE  },
+	[TokenType.BYTES]            = { &parse_bytes,            null,                    Precedence.NONE,           Assoc.NONE  },
 	[TokenType.TRUE]             = { &parse_bool,             null,                    Precedence.NONE,           Assoc.NONE  },
 	[TokenType.FALSE]            = { &parse_bool,             null,                    Precedence.NONE,           Assoc.NONE  },
-	[TokenType.NULL]              = { &parse_null,             null,                    Precedence.NONE,           Assoc.NONE  },
+	[TokenType.NULL]             = { &parse_null,             null,                    Precedence.NONE,           Assoc.NONE  },
 	// [TokenType.LENGTHOF]         = { &parse_lengthof,         null,                    NONE,           Assoc.NONE  },
 	[TokenType.INTEGER]          = { &parse_integer,          null,                    Precedence.NONE,           Assoc.NONE  },
 	[TokenType.REAL]             = { &parse_double,           null,                    Precedence.NONE,           Assoc.NONE  },
@@ -272,6 +272,14 @@ fn Expr*? parse_bool(PrattParser *p, Token tok)
 fn Expr*? parse_null(PrattParser *p, Token tok)
 {
 	ExprConst const_expr = { .const_kind = ConstKind.CONST_POINTER, .ptr = 0 };
+	Expr *e = mem::tnew(Expr);
+	*e = { .kind = EXPR_CONST, .as.const_expr = const_expr };
+	return e;
+}
+
+fn Expr*? parse_bytes(PrattParser *p, Token tok)
+{
+	ExprConst const_expr = { .const_kind = ConstKind.CONST_BYTES, .bytes = tok };
 	Expr *e = mem::tnew(Expr);
 	*e = { .kind = EXPR_CONST, .as.const_expr = const_expr };
 	return e;
@@ -458,6 +466,8 @@ enum ConstKind
 	CONST_INTEGER,
 	CONST_BOOL,
 	CONST_POINTER,
+	CONST_BYTES,
+	// CONST_STRING,
 }
 
 struct ExprConst (Printable)
@@ -469,6 +479,7 @@ struct ExprConst (Printable)
 		Token ixx;
 		bool  b;
 		uptr  ptr;
+		Token bytes;
 	}
 }
 
@@ -480,7 +491,8 @@ fn usz? ExprConst.to_format(&self, Formatter *f) @dynamic
 		case CONST_FLOAT:   n += f.printf("%s", self.fxx)!;
 		case CONST_INTEGER: n += f.printf("%s", self.ixx)!;
 		case CONST_BOOL   : n += f.printf("<%s>", self.b)!;
-		case CONST_POINTER: n += f.printf("%s", self.ptr == 0 ? null : (void*)self.ptr)!;
+		case CONST_POINTER: n += f.printf("%s", self.ptr)!;
+		case CONST_BYTES  : n += f.printf("%s", self.bytes)!;
 	}
 	return n;
 }
