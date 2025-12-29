@@ -225,7 +225,7 @@ Parselet[*] pratt_table = {
 	// [TokenType.LENGTHOF]         = { &parse_lengthof,         null,                    NONE,           Assoc.NONE  },
 	[TokenType.INTEGER]          = { &parse_integer,          null,                    Precedence.NONE,           Assoc.NONE  },
 	[TokenType.REAL]             = { &parse_double,           null,                    Precedence.NONE,           Assoc.NONE  },
-	// [TokenType.BUILTIN]          = { &parse_builtin,          null,                    NONE,           Assoc.NONE  },
+	[TokenType.BUILTIN]          = { &parse_builtin,          null,                    Precedence.NONE,           Assoc.NONE  },
 	// [TokenType.CHAR_LITERAL]     = { &parse_char_lit,         null,                    NONE,           Assoc.NONE  },
 	[TokenType.STRING]           = { &parse_string,           null,                    Precedence.NONE,           Assoc.NONE  },
 
@@ -245,7 +245,35 @@ Parselet[*] pratt_table = {
 	[TokenType.EOF]          = {},
 };
 
-faultdef POISENED_EXPR;
+faultdef POISONED_EXPR;
+
+fn bool token_is_some_ident(Token tok) @inline
+{
+	switch (tok.type)
+	{
+		case TokenType.TYPE_IDENT:
+		case TokenType.IDENT:
+		case TokenType.CONST_IDENT:
+			return true;
+		default:
+			return false;
+	}
+}
+
+fn Expr*? parse_builtin(PrattParser *p, Token tok)
+{
+	if (!token_is_some_ident(p.peek()))
+	{
+		// Unexpected '$$', did you mean to write a builtin?
+		return POISONED_EXPR?;
+	}
+	tok = p.consume(); // Consume '$$'
+
+	Expr *e = mem::tnew(Expr);
+	e.kind = (tok.type == TokenType.CONST_IDENT) ? EXPR_COMPILER_CONST : EXPR_BUILTIN;
+	e.as.builtin_expr.ident = tok;
+	return e;
+}
 
 fn Expr*? parse_integer(PrattParser *p, Token tok)
 {
@@ -378,7 +406,7 @@ fn void test_parse_prefix() @test => @pool()
 fn Expr*? parse_ident_start_expr(PrattParser *p, Token tok)
 {
 	Path *path;
-	if (!parse_path_prefix(p, &tok, &path)) return POISENED_EXPR?;
+	if (!parse_path_prefix(p, &tok, &path)) return POISONED_EXPR?;
 
 	switch (tok.type)
 	{
@@ -389,11 +417,12 @@ fn Expr*? parse_ident_start_expr(PrattParser *p, Token tok)
 			expr.as.ident_expr.path = path;
 			return expr;
 		case TokenType.TYPE_IDENT:
+			// FIXME: implement this
 			// return parse_type_expr_with_path(p, tok, path);
-			return POISENED_EXPR?;
+			return POISONED_EXPR?;
 		default:
 			// Expected a type, function or constant.
-			return POISENED_EXPR?;
+			return POISONED_EXPR?;
 	}
 }
 
@@ -515,6 +544,11 @@ struct ExprIdent
 	Token ident;
 }
 
+struct ExprBuiltin
+{
+	Token ident;
+}
+
 struct ExprTernary
 {
 	Expr *condition;
@@ -591,6 +625,9 @@ enum ExprKind
 	EXPR_BINARY,
 	POSTFIX_EXPR,
 	EXPR_CALL,
+
+	EXPR_BUILTIN,
+	EXPR_COMPILER_CONST,
 }
 
 struct Expr (Printable)
@@ -602,6 +639,7 @@ struct Expr (Printable)
 		ExprBinary  binary_expr;
 		ExprCall    call_expr;
 		ExprIdent   ident_expr;
+		ExprBuiltin builtin_expr;
 
 		UnaryExpression   u;
 
@@ -617,6 +655,8 @@ fn usz? Expr.to_format(&self, Formatter *f) @dynamic
 	{
 		case EXPR_CONST:   n += f.printf("(ExprConst %s)", self.as.const_expr)!;
 		case EXPR_IDENT:   n += f.printf("(ExprIdent %s%s)", self.as.ident_expr.path ? self.as.ident_expr.path.path.str_view() : "", self.as.ident_expr.ident)!;
+		case EXPR_COMPILER_CONST:
+		case EXPR_BUILTIN: n += f.printf("(ExprBuiltin %s)", self.as.builtin_expr.ident)!;
 		case EXPR_TERNARY: n += f.printf("(%s ? %s : %s)", self.as.ternary_expr.condition, self.as.ternary_expr.then_arm, self.as.ternary_expr.else_arm)!;
 		case EXPR_BINARY:  n += f.printf("(%s %s %s)", self.as.binary_expr.left, self.as.binary_expr.op, self.as.binary_expr.right)!;
 		case EXPR_CALL:    n += f.printf("(ExprCall %s( %s ))", self.as.call_expr.func, self.as.call_expr.args)!;
