@@ -46,7 +46,7 @@ struct TestCase
 fn void test_pratt_parser() @test
 {
 	TestCase[] test = {
-		{ "a!", "<IDENT> a <BANG> !" },
+		{ "a", "(ExprIdent <IDENT> a)" },
 	};
 	foreach (tc: test)
 	{
@@ -150,7 +150,6 @@ Parselet[*] pratt_table = {
 	[TokenType.INVALID]      = {},
 
 	// Precedence.ASSIGNMENT
-	[TokenType.CT_CONCAT_ASSIGN] = { null,                    &parse_binary,           Precedence.ASSIGNMENT,     Assoc.LEFT  },
 	[TokenType.EQ]               = { null,                    &parse_binary,           Precedence.ASSIGNMENT,     Assoc.LEFT  },
 	[TokenType.PLUS_ASSIGN]      = { null,                    &parse_binary,           Precedence.ASSIGNMENT,     Assoc.LEFT  },
 	[TokenType.MINUS_ASSIGN]     = { null,                    &parse_binary,           Precedence.ASSIGNMENT,     Assoc.LEFT  },
@@ -162,6 +161,7 @@ Parselet[*] pratt_table = {
 	[TokenType.BIT_OR_ASSIGN]    = { null,                    &parse_binary,           Precedence.ASSIGNMENT,     Assoc.LEFT  },
 	[TokenType.SHR_ASSIGN]       = { null,                    &parse_binary,           Precedence.ASSIGNMENT,     Assoc.LEFT  },
 	[TokenType.SHL_ASSIGN]       = { null,                    &parse_binary,           Precedence.ASSIGNMENT,     Assoc.LEFT  },
+	[TokenType.CT_CONCAT_ASSIGN] = { null,                    &parse_binary,           Precedence.ASSIGNMENT,     Assoc.LEFT  },
 
 	// Precedence.TERNARY
 	[TokenType.QUESTION]         = { null,                    &parse_ternary,          Precedence.TERNARY,        Assoc.RIGHT },
@@ -227,16 +227,16 @@ Parselet[*] pratt_table = {
 	[TokenType.REAL]             = { &parse_double,           null,                    Precedence.NONE,           Assoc.NONE  },
 	// [TokenType.BUILTIN]          = { &parse_builtin,          null,                    NONE,           Assoc.NONE  },
 	// [TokenType.CHAR_LITERAL]     = { &parse_char_lit,         null,                    NONE,           Assoc.NONE  },
-	// [TokenType.STRING]           = { &parse_string,           null,                    NONE,           Assoc.NONE  },
+	[TokenType.STRING]           = { &parse_string,           null,                    Precedence.NONE,           Assoc.NONE  },
 
-	// [TokenType.IDENT]            = { &parse_ident_start_expr, null,                    NONE,           Assoc.NONE  },
+	[TokenType.IDENT]            = { &parse_ident_start_expr, null,                    Precedence.NONE,           Assoc.NONE  },
 	// [TokenType.TYPE_IDENT]       = { &parse_type_ident,       null,                    NONE,           Assoc.NONE  },
 	// [TokenType.CT_IDENT]         = { &parse_ct_ident,         null,                    NONE,           Assoc.NONE  },
-	// [TokenType.CONST_IDENT]      = { &parse_ident,            null,                    NONE,           Assoc.NONE  },
+	[TokenType.CONST_IDENT]      = { &parse_ident,            null,                    Precedence.NONE,           Assoc.NONE  },
 	// [TokenType.CT_CONST_IDENT]   = { &parse_ct_ident,         null,                    NONE,           Assoc.NONE  },
 	// [TokenType.CT_TYPE_IDENT]    = { &parse_type_ident,       null,                    NONE,           Assoc.NONE  },
 	// [TokenType.HASH_IDENT]       = { &parse_hash_ident,       null,                    NONE,           Assoc.NONE  },
-	// [TokenType.AT_IDENT]         = { &parse_ident,            null,                    NONE,           Assoc.NONE  },
+	[TokenType.AT_IDENT]         = { &parse_ident,            null,                    Precedence.NONE,           Assoc.NONE  },
 	// [TokenType.ELLIPSIS]         = { &parse_splat,            null,                    NONE,           Assoc.NONE  },
 	// [TokenType.FN]               = { &parse_lambda,           null,                    NONE,           Assoc.NONE  },
 
@@ -244,6 +244,8 @@ Parselet[*] pratt_table = {
 
 	[TokenType.EOF]          = {},
 };
+
+faultdef POISENED_EXPR;
 
 fn Expr*? parse_integer(PrattParser *p, Token tok)
 {
@@ -285,12 +287,114 @@ fn Expr*? parse_bytes(PrattParser *p, Token tok)
 	return e;
 }
 
+fn Expr*? parse_string(PrattParser *p, Token tok)
+{
+	ExprConst const_expr = { .const_kind = ConstKind.CONST_STRING, .bytes = tok };
+	Expr *e = mem::tnew(Expr);
+	*e = { .kind = EXPR_CONST, .as.const_expr = const_expr };
+	return e;
+}
 
+<*
+ ident := CONST_IDENT | IDENT
+*>
 fn Expr*? parse_ident(PrattParser *p, Token tok)
 {
 	Expr *e = mem::tnew(Expr);
-	*e = { .kind = IDENT_EXPR, .as.i.ident = tok };
+	*e = { .kind = EXPR_IDENT, .as.ident_expr.ident = tok };
 	return e;
+}
+
+struct Path (Printable)
+{
+	DString     path;
+	List{Token} tokens;
+}
+
+fn void Path.free(&self)
+{
+	self.path.free();
+	self.tokens.free();
+
+}
+
+fn usz? Path.to_format(&self, Formatter *f) @dynamic => f.printf("%s", self.path.str_view());
+
+fn bool parse_path_prefix(PrattParser *p, Token *tok, Path **path_ref)
+{
+	if (tok.type != TokenType.IDENT
+		|| p.peek().type != TokenType.SCOPE) return true;
+
+	Path *path = mem::tnew(Path);
+	path.path.tinit(); // TODO: Allocator??
+	path.tokens.tinit(); // TODO: Allocator??
+	path.path.append_string(tok.text);
+
+	path.tokens.push(*tok);
+	path.tokens.push(*tok = p.consume());
+	path.tokens.push(*tok = p.consume());
+
+	while (tok.type == TokenType.IDENT && p.peek().type == TokenType.SCOPE)
+	{
+		path.path.append_string("::");
+		path.path.append_string(tok.text);
+
+		path.tokens.push(*tok = p.consume());
+		path.tokens.push(*tok = p.consume()); // Consume SCOPE
+	}
+
+	if (tok.type != TokenType.IDENT) {
+		path.free();
+		return false;
+	}
+
+	*path_ref = path;
+	return true;
+}
+
+fn void test_parse_prefix() @test => @pool()
+{
+	String path_str = "very::looong::path::name";
+	PrattParser p;
+	p.init(path_str);
+
+	Token tok = p.consume();
+
+	assert(tok.type == TokenType.IDENT,
+		"Beginning token should of type IDENT");
+
+	assert(p.peek().type == TokenType.SCOPE,
+		"Second token should of type SCOPE, but got %s", p.peek());
+
+	Path *path;
+	assert(parse_path_prefix(&p, &tok, &path));
+	assert(tok.type == TokenType.IDENT, "got: %s", tok);
+	assert(path, "Returned path should not be null");
+
+	String got = path.path.str_view();
+	assert(got == "very::looong::path", "got: %s, want: very::looong::path", got, path_str);
+}
+
+fn Expr*? parse_ident_start_expr(PrattParser *p, Token tok)
+{
+	Path *path;
+	if (!parse_path_prefix(p, &tok, &path)) return POISENED_EXPR?;
+
+	switch (tok.type)
+	{
+		case TokenType.IDENT:
+		case TokenType.CONST_IDENT:
+		case TokenType.AT_IDENT:
+			Expr *expr = parse_ident(p, tok)!;
+			expr.as.ident_expr.path = path;
+			return expr;
+		case TokenType.TYPE_IDENT:
+			// return parse_type_expr_with_path(p, tok, path);
+			return POISENED_EXPR?;
+		default:
+			// Expected a type, function or constant.
+			return POISENED_EXPR?;
+	}
 }
 
 fn Expr*? parse_group(PrattParser *p, Token tok)
@@ -313,24 +417,6 @@ fn Expr*? parse_unary(PrattParser *p, Token tok)
 
 	Expr *e = mem::tnew(Expr);
 	*e = { .kind = UNARY_EXPR, .as.u = { tok, right} };
-
-	return e;
-}
-
-fn Expr*? parse_assign(PrattParser *p, Expr *left, Token tok)
-{
-	assert(left.kind == IDENT_EXPR,
-		"Left-hand side of assignment needs to be a name");
-
-	Parselet parselet = pratt_table[tok.type];
-
-	// If operator is right-associated, decrease binding power by one.
-	int next_bp = parselet.binding_power - (parselet.assoc == Assoc.RIGHT ? 1 : 0);
-
-	Expr* right = parse_expr(p, next_bp)!;
-
-	Expr *e = mem::tnew(Expr);
-	*e = { .kind = ASSIGN_EXPR, .as.a = { left.as.i.ident, right} };
 
 	return e;
 }
@@ -417,21 +503,16 @@ fn Expr*? parse_call(PrattParser *p, Expr *left, Token tok)
  Expressions
 */
 
-struct IdentExpression
-{
-	Token ident;
-}
-
 struct UnaryExpression
 {
 	Token op;
 	Expr *right;
 }
 
-struct AssignExpression
+struct ExprIdent
 {
-	Token op;
-	Expr *right;
+	Path  *path;
+	Token ident;
 }
 
 struct ExprTernary
@@ -467,7 +548,7 @@ enum ConstKind
 	CONST_BOOL,
 	CONST_POINTER,
 	CONST_BYTES,
-	// CONST_STRING,
+	CONST_STRING,
 }
 
 struct ExprConst (Printable)
@@ -490,9 +571,10 @@ fn usz? ExprConst.to_format(&self, Formatter *f) @dynamic
 	{
 		case CONST_FLOAT:   n += f.printf("%s", self.fxx)!;
 		case CONST_INTEGER: n += f.printf("%s", self.ixx)!;
-		case CONST_BOOL   : n += f.printf("<%s>", self.b)!;
+		case CONST_BOOL:    n += f.printf("<%s>", self.b)!;
 		case CONST_POINTER: n += f.printf("%s", self.ptr)!;
-		case CONST_BYTES  : n += f.printf("%s", self.bytes)!;
+		case CONST_STRING:
+		case CONST_BYTES:   n += f.printf("%s", self.bytes)!;
 	}
 	return n;
 }
@@ -501,11 +583,10 @@ enum ExprKind
 {
 	// Prefix Parselets
 	EXPR_CONST,
-	IDENT_EXPR,
+	EXPR_IDENT,
 	UNARY_EXPR,
 
 	// Infix Parselets
-	ASSIGN_EXPR,
 	EXPR_TERNARY,
 	EXPR_BINARY,
 	POSTFIX_EXPR,
@@ -520,10 +601,9 @@ struct Expr (Printable)
 		ExprTernary ternary_expr;
 		ExprBinary  binary_expr;
 		ExprCall    call_expr;
+		ExprIdent   ident_expr;
 
-		IdentExpression   i;
 		UnaryExpression   u;
-		AssignExpression  a;
 
 
 		PostfixExpression p;
@@ -535,14 +615,13 @@ fn usz? Expr.to_format(&self, Formatter *f) @dynamic
 	usz n;
 	switch (self.kind)
 	{
-		case EXPR_CONST:   n += f.printf("%s", self.as.const_expr)!;
-		case EXPR_TERNARY: n += f.printf("( %s ? %s : %s )", self.as.ternary_expr.condition, self.as.ternary_expr.then_arm, self.as.ternary_expr.else_arm)!;
-		case EXPR_BINARY:  n += f.printf("( %s %s %s )", self.as.binary_expr.left, self.as.binary_expr.op, self.as.binary_expr.right)!;
-		case EXPR_CALL:    n += f.printf("%s( %s )", self.as.call_expr.func, self.as.call_expr.args)!;
+		case EXPR_CONST:   n += f.printf("(ExprConst %s)", self.as.const_expr)!;
+		case EXPR_IDENT:   n += f.printf("(ExprIdent %s%s)", self.as.ident_expr.path ? self.as.ident_expr.path.path.str_view() : "", self.as.ident_expr.ident)!;
+		case EXPR_TERNARY: n += f.printf("(%s ? %s : %s)", self.as.ternary_expr.condition, self.as.ternary_expr.then_arm, self.as.ternary_expr.else_arm)!;
+		case EXPR_BINARY:  n += f.printf("(%s %s %s)", self.as.binary_expr.left, self.as.binary_expr.op, self.as.binary_expr.right)!;
+		case EXPR_CALL:    n += f.printf("(ExprCall %s( %s ))", self.as.call_expr.func, self.as.call_expr.args)!;
 
-		case IDENT_EXPR:   n += f.printf("%s", self.as.i.ident)!;
 		case UNARY_EXPR:   n += f.printf("( %s %s )", self.as.u.op, self.as.u.right)!;
-		case ASSIGN_EXPR:  n += f.printf("( %s = %s )", self.as.a.op, self.as.a.right)!;
 		case POSTFIX_EXPR: n += f.printf("( %s %s )", self.as.p.left, self.as.p.op)!;
 	}
 	return n;
