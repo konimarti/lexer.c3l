@@ -745,7 +745,7 @@ enum NumberState : inline char (TokenType type) @private
 	EXPSIGN   = INVALID,  // Exponent sign: +, -
 }
 
-const NumberState[char.max][*] TRANSITIONS @private = {
+const NumberState[char.max+1][*] TRANSITIONS @private = {
 	[NumberState.INIT] = {
 		['1'..'9'] = INTEGER,
 		['0']      = ZERO,
@@ -873,7 +873,7 @@ enum IdentState : inline char (bool accept) @private {
 	CONST_STATE = true,
 }
 
-const IdentState[char.max][*] TRANSITIONS @private = {
+const IdentState[char.max+1][*] TRANSITIONS @private = {
 	[IdentState.INIT_STATE] = {
 		['A'..'Z'] = CONST_STATE,
 		['a'..'z'] = IDENT_STATE,
