@@ -452,9 +452,7 @@ fn Expr *parse_type_expr_with_path(PrattParser *p, Token tok, Path *path)
 	}
 	else
 	{
-		// FIXME: needs to be implemented
-		// type = parse_optional_type(p);
-		unreachable("not implemented yet");
+		type = parse_optional_type(p);
 	}
 
 	if (p.peek().type == TokenType.LBRACE)
@@ -474,6 +472,21 @@ fn Expr *parse_type_expr_with_path(PrattParser *p, Token tok, Path *path)
 			"did you mean '.'?");
 	}
 	return expr;
+}
+
+fn TypeInfo* parse_optional_type(PrattParser *p) => parse_optional_type_maybe_generic(p, true);
+fn TypeInfo* parse_optional_type_no_generic(PrattParser *p) => parse_optional_type_maybe_generic(p, false);
+
+fn TypeInfo* parse_optional_type_maybe_generic(PrattParser *p, bool allow_generic)
+{
+	TypeInfo *info = parse_base_type(p)!!; // TODO: Propagate error
+	info = parse_type_with_base_maybe_generic(c, info, allow_generic);
+	if (p.peek().type == TokenType.QUESTION)
+	{
+		info.is_optional = true;
+		info.optional = p.consume();
+	}
+	return info;
 }
 
 fn TypeInfo* parse_type_with_base(PrattParser *p, TypeInfo *type_info)
