@@ -7,10 +7,6 @@
 		"lexv": {
 			"type": "executable",
 			"sources": [ "src/lexv/*" ]
-		},
-		"pratt": {
-			"type": "executable",
-			"sources": [ "src/pratt/*" ]
 		}
 	}
 }
