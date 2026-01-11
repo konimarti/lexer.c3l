@@ -2,7 +2,7 @@
 	"authors": [ "Koni Marti <koni.marti@gmail.com>" ],
 	"version": "0.1.0",
 	"output": "build",
-	"sources": [ "*" ],
+	"sources": [ "lexer.c3" ],
 	"targets": {
 		"lexv": {
 			"type": "executable",
