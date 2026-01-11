@@ -23,8 +23,19 @@ The lexer also supports language constructs such as **contract blocks** and
 - **Dual-mode lexing:** A dedicated *contract lexer* is available to tokenize
   contract sections separately for improved modularity.
 
+- **Zero allocations:** The lexer does not allocate any memory but instead
+  returns tokens where the lexeme refers to the input string.
+
 - **Robust testing:** Verified against the C3 standard library and all unit
   tests for complete lexical correctness.
+
+## Notes
+
+The lexer returns a token for line comments (`LINE_COMMENT`), block comments
+(`BLOCK_COMMENT`), and contracts (`CONTRACT`).
+
+If you want to step into the contracts and lex them too, then use the lexeme of
+the `CONTRACT` token with the `ContractLexer`:
 
 ## Testing
 
