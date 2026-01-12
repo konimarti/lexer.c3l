@@ -662,6 +662,8 @@ struct ContractLexer
 	Splitter splitter;
 	Lexer    lexer;
 	bool     lexer_init;
+	<* intro is only available after the entire contract is lexed *>
+	String   intro;
 }
 
 <*
@@ -687,6 +689,7 @@ fn Token? ContractLexer.next(&self)
 		{
 			if (next_line.trim().starts_with("@"))
 			{
+				self.intro = self.splitter.string[:pos];
 				self.lexer.init(self.splitter.string[pos..], emit_eol: true);
 				self.lexer_init = true;
 				break;
@@ -723,6 +726,7 @@ fn void test_contract_lexer() @test
 		assert(tok.type == want[0], "Token type mismatch: got=%s, but want=%s", tok.type, want[0]);
 		want = want[1..];
 	}
+	assert(dl.intro.trim() == "Check if a character is in a set.");
 }
 
 module c3::lexer::number;
