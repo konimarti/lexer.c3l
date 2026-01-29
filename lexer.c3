@@ -115,7 +115,7 @@ fn char? Lexer.advance(&self)
 {
 	char c;
 
-	if (self.at_end()) return io::EOF?;
+	if (self.at_end()) return io::EOF~;
 
 	c = self.input[self.pos];
 	self.pos++;
@@ -185,7 +185,7 @@ fn Token? Lexer.next(&self)
 	self.scan_whitespace()!;
 
 	self.token_start = self.pos;
-	if (self.at_end()) return io::EOF?;
+	if (self.at_end()) return io::EOF~;
 
 	switch (c = self.peek())
 	{
@@ -197,7 +197,7 @@ fn Token? Lexer.next(&self)
 			{
 				case self.must("^="): type = BIT_XOR_ASSIGN;
 				case self.must("^"):  type = BIT_XOR;
-				default: return INVALID_CHAR?;
+				default: return INVALID_CHAR~;
 			}
 			return self.emit_token(type);
 		case '*':
@@ -205,7 +205,7 @@ fn Token? Lexer.next(&self)
 			{
 				case self.must("*="): type = MULT_ASSIGN;
 				case self.must("*"):  type = STAR;
-				default: return INVALID_CHAR?;
+				default: return INVALID_CHAR~;
 			}
 			return self.emit_token(type);
 		case '%':
@@ -213,7 +213,7 @@ fn Token? Lexer.next(&self)
 			{
 				case self.must("%="): type = MOD_ASSIGN;
 				case self.must("%"):  type = MOD;
-				default: return INVALID_CHAR?;
+				default: return INVALID_CHAR~;
 			}
 			return self.emit_token(type);
 		case '.':
@@ -222,7 +222,7 @@ fn Token? Lexer.next(&self)
 				case self.must("..."): type = ELLIPSIS;
 				case self.must(".."):  type = DOTDOT;
 				case self.must("."):   type = DOT;
-				default: return INVALID_CHAR?;
+				default: return INVALID_CHAR~;
 			}
 			return self.emit_token(type);
 		case '+':
@@ -233,7 +233,7 @@ fn Token? Lexer.next(&self)
 				case self.must("++"):   type = PLUSPLUS;
 				case self.must("+="):   type = PLUS_ASSIGN;
 				case self.must("+"):    type = PLUS;
-				default: return INVALID_CHAR?;
+				default: return INVALID_CHAR~;
 			}
 			return self.emit_token(type);
 		case '-':
@@ -243,7 +243,7 @@ fn Token? Lexer.next(&self)
 				case self.must("-="): type = MINUS_ASSIGN;
 				case self.must("->"): type = ARROW;
 				case self.must("-"):  type = MINUS;
-				default: return INVALID_CHAR?;
+				default: return INVALID_CHAR~;
 			}
 			return self.emit_token(type);
 		case ':':
@@ -251,7 +251,7 @@ fn Token? Lexer.next(&self)
 			{
 				case self.must("::"):  type = SCOPE;
 				case self.must(":"):   type = COLON;
-				default: return INVALID_CHAR?;
+				default: return INVALID_CHAR~;
 			}
 			return self.emit_token(type);
 		case '!':
@@ -260,7 +260,7 @@ fn Token? Lexer.next(&self)
 				case self.must("!!"):  type = BANGBANG;
 				case self.must("!="):  type = NOT_EQUAL;
 				case self.must("!"):   type = BANG;
-				default: return INVALID_CHAR?;
+				default: return INVALID_CHAR~;
 			}
 			return self.emit_token(type);
 		case '?':
@@ -270,7 +270,7 @@ fn Token? Lexer.next(&self)
 				case self.must("??"):  type = QUESTQUEST;
 				case self.must("?:"):  type = ELVIS;
 				case self.must("?"):   type = QUESTION;
-				default: return INVALID_CHAR?;
+				default: return INVALID_CHAR~;
 			}
 			return self.emit_token(type);
 		case '|':
@@ -280,7 +280,7 @@ fn Token? Lexer.next(&self)
 				case self.must("||"):  type = OR;
 				case self.must("|="):  type = BIT_OR_ASSIGN;
 				case self.must("|"):   type = BIT_OR;
-				default: return INVALID_CHAR?;
+				default: return INVALID_CHAR~;
 			}
 			return self.emit_token(type);
 		case '&':
@@ -290,7 +290,7 @@ fn Token? Lexer.next(&self)
 				case self.must("&&"):  type = AND;
 				case self.must("&="):  type = BIT_AND_ASSIGN;
 				case self.must("&"):   type = AMP;
-				default: return INVALID_CHAR?;
+				default: return INVALID_CHAR~;
 			}
 			return self.emit_token(type);
 		case '=':
@@ -299,7 +299,7 @@ fn Token? Lexer.next(&self)
 				case self.must("=>"):  type = IMPLIES;
 				case self.must("=="):  type = EQEQ;
 				case self.must("="):   type = EQ;
-				default: return INVALID_CHAR?;
+				default: return INVALID_CHAR~;
 			}
 			return self.emit_token(type);
 		case '>':
@@ -310,7 +310,7 @@ fn Token? Lexer.next(&self)
 				case self.must(">="):  type = GREATER_EQ;
 				case self.must(">]"):  type = RVEC;
 				case self.must(">"):   type = GREATER;
-				default: return INVALID_CHAR?;
+				default: return INVALID_CHAR~;
 			}
 			return self.emit_token(type);
 
@@ -319,7 +319,7 @@ fn Token? Lexer.next(&self)
 			{
 				case self.must("[<"):  type = LVEC;
 				case self.must("["):   type = LBRACKET;
-				default: return INVALID_CHAR?;
+				default: return INVALID_CHAR~;
 			}
 			return self.emit_token(type);
 
@@ -336,7 +336,7 @@ fn Token? Lexer.next(&self)
 				case self.must("/*"): self.scan_block_comment()!; type = BLOCK_COMMENT;
 				case self.must("/="): type = DIV_ASSIGN;
 				case self.must("/") : type = DIV;
-				default: return INVALID_CHAR?;
+				default: return INVALID_CHAR~;
 			}
 			return self.emit_token(type);
 
@@ -348,7 +348,7 @@ fn Token? Lexer.next(&self)
 				case self.must("<<"):  type = SHL_OP;
 				case self.must("<="):  type = LESS_EQ;
 				case self.must("<") :  type = LESS;
-				default: return INVALID_CHAR?;
+				default: return INVALID_CHAR~;
 			}
 			return self.emit_token(type);
 
@@ -357,7 +357,7 @@ fn Token? Lexer.next(&self)
 			{
 				case self.must("$$"): return self.emit_token(BUILTIN);
 				case self.must("$"):  return self.lex_compile_time()!;
-				default: return INVALID_CHAR?;
+				default: return INVALID_CHAR~;
 			}
 
 		case '@':
@@ -370,7 +370,7 @@ fn Token? Lexer.next(&self)
 				case self.must("#"):
 				case self.must("@"):
 					return self.lex_at_or_hash_ident()!;
-				default: return INVALID_CHAR?;
+				default: return INVALID_CHAR~;
 			}
 
 		case 'b':
@@ -406,7 +406,7 @@ fn Token? Lexer.next(&self)
 			self.report_error(string::tformat(
 				"encountered invalid char: ""'%c'", c).tescape());
 			};
-			return INVALID_CHAR?;
+			return INVALID_CHAR~;
 	}
 }
 
