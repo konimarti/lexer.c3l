@@ -320,6 +320,9 @@ fn String token_to_string(Token tok, bool doc_mode = false)
 	case CT_VAREF: return tok.text;
 	case CT_VASPLAT: return tok.text;
 	case CT_VATYPE: return tok.text;
+	case AT_INLINE: return tok.text;
+	case AT_PURE: return tok.text;
+	case AT_NOINLINE: return tok.text;
 	case EOL: return "<EOL>";
 	case EOF: return "EOF";
 	}

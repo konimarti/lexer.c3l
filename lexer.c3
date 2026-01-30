@@ -56,7 +56,7 @@ enum TokenType : inline ushort
 	CT_FOR, CT_FOREACH, CT_IF, CT_IS_CONST, CT_INCLUDE, CT_KINDOF,
 	CT_NAMEOF, CT_OFFSETOF, CT_QNAMEOF, CT_SIZEOF, CT_STRINGIFY, CT_SWITCH,
 	CT_TYPEFROM, CT_TYPEOF, CT_VAARG, CT_VACONST, CT_VACOUNT, CT_VAEXPR,
-	CT_VAREF, CT_VATYPE, CT_VASPLAT,
+	CT_VAREF, CT_VATYPE, CT_VASPLAT, AT_INLINE, AT_PURE, AT_NOINLINE,
 
 	EOL, EOF,
 }
@@ -654,7 +654,14 @@ fn Token? Lexer.lex_at_or_hash_ident(&self)
 		self.advance()!;
 	}
 
-	return self.emit_token(ident::classify(self.lexeme()));
+	String str = self.lexeme();
+	switch (str)
+	{
+		case "@inline":   return self.emit_token(AT_INLINE);
+		case "@pure":     return self.emit_token(AT_PURE);
+		case "@noinline": return self.emit_token(AT_NOINLINE);
+		default: return self.emit_token(ident::classify(str));
+	}
 }
 
 struct ContractLexer
@@ -717,7 +724,7 @@ fn void test_contract_lexer() @test
 	TokenType[] want = {
 		AT_IDENT, IDENT, COLON, STRING, EOL, EOL, EOL,
 		AT_IDENT, LBRACKET, IDENT, RBRACKET, IDENT, COLON, STRING, EOL,
-		AT_IDENT, EOL,
+		AT_PURE, EOL,
 		AT_IDENT, STRING, EOL,
 	};
 
