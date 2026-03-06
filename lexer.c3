@@ -44,11 +44,11 @@ enum TokenType : inline ushort
 	USZ, FAULT, ANY, TYPEID,
 
 	// Keywords
-	ALIAS, ASM, ASSERT, ATTRDEF, BITSTRUCT, CONST, ENUM, FAULTDEF, FUNC,
-	IMPORT, INTERFACE, MACRO, MODULE, STRUCT, UNION, TYPEDEF, BREAK, CASE,
-	CATCH, CONTINUE, DEFAULT, DEFER, DO, ELSE, EXTERN, FALSE, FOR, FOREACH,
-	FOREACH_R, IF, INLINE, LENGTHOF, NEXTCASE, NULL, RETURN, STATIC, SWITCH,
-	TLOCAL, TRUE, TRY, VAR, WHILE,
+	ALIAS, ASM, ASSERT, ATTRDEF, BITSTRUCT, CONST, CONSTDEF, ENUM,
+	FAULTDEF, FUNC, IMPORT, INTERFACE, MACRO, MODULE, STRUCT, UNION,
+	TYPEDEF, BREAK, CASE, CATCH, CONTINUE, DEFAULT, DEFER, DO, ELSE,
+	EXTERN, FALSE, FOR, FOREACH, FOREACH_R, IF, INLINE, LENGTHOF, NEXTCASE,
+	NULL, RETURN, STATIC, SWITCH, TLOCAL, TRUE, TRY, VAR, WHILE,
 
 	CT_ALIGNOF, CT_ASSERT, CT_ASSIGNABLE, CT_CASE, CT_DEFAULT, CT_DEFINED,
 	CT_ECHO, CT_ELSE, CT_ENDFOR, CT_ENDFOREACH, CT_ENDIF, CT_ENDSWITCH,
@@ -516,6 +516,7 @@ fn Token? Lexer.lex_ident(&self)
 		case "attrdef":   return self.emit_token(ATTRDEF);
 		case "bitstruct": return self.emit_token(BITSTRUCT);
 		case "const":     return self.emit_token(CONST);
+		case "constdef":  return self.emit_token(CONSTDEF);
 		case "enum":      return self.emit_token(ENUM);
 		case "faultdef":  return self.emit_token(FAULTDEF);
 		case "fn":        return self.emit_token(FUNC);
@@ -740,20 +741,20 @@ module c3::lexer::number;
 
 enum NumberState : inline char (TokenType type) @private
 {
-	ERROR     = INVALID,
-	INIT      = INVALID,
-	INTEGER   = INTEGER,
-	ZERO      = INTEGER,
-	HEXINT    = INTEGER,
-	OCTINT    = INTEGER,
-	BININT    = INTEGER,
-	INTSUFFIX = INTEGER,  // Integer suffix: ([iu](8|16|32|64|128)|[uU][lL]|[lL])
-	REAL      = REAL,
-	INTDEC    = REAL,     // Integer decimal: INT "." INT
-	EDIGITS   = REAL,     // Exponent digits
-	HEXDEC    = INVALID,  // Hexadecimal "decimal": HEXINT "." HEXINT
-	EXPONENT  = INVALID,  // E-notation [eEpP]
-	EXPSIGN   = INVALID,  // Exponent sign: +, -
+	ERROR     { INVALID },
+	INIT      { INVALID },
+	INTEGER   { INTEGER },
+	ZERO      { INTEGER },
+	HEXINT    { INTEGER },
+	OCTINT    { INTEGER },
+	BININT    { INTEGER },
+	INTSUFFIX { INTEGER },  // Integer suffix: ([iu](8|16|32|64|128)|[uU][lL]|[lL])
+	REAL      { REAL },
+	INTDEC    { REAL },     // Integer decimal: INT "." INT
+	EDIGITS   { REAL },     // Exponent digits
+	HEXDEC    { INVALID },  // Hexadecimal "decimal": HEXINT "." HEXINT
+	EXPONENT  { INVALID },  // E-notation [eEpP]
+	EXPSIGN   { INVALID },  // Exponent sign: + }, -
 }
 
 const NumberState[char.max+1][*] TRANSITIONS @private = {
@@ -877,11 +878,11 @@ fn void test_number_classify() @test
 module c3::lexer::ident;
 
 enum IdentState : inline char (bool accept) @private {
-	ERROR_STATE = false,
-	INIT_STATE  = false,
-	IDENT_STATE = true,
-	TYPE_STATE  = true,
-	CONST_STATE = true,
+	ERROR_STATE { false },
+	INIT_STATE  { false },
+	IDENT_STATE { true },
+	TYPE_STATE  { true },
+	CONST_STATE { true },
 }
 
 const IdentState[char.max+1][*] TRANSITIONS @private = {

@@ -218,6 +218,7 @@ fn String token_to_string(Token tok, bool doc_mode = false)
 	case ATTRDEF: return tok.text;
 	case BITSTRUCT: return tok.text;
 	case CONST: return tok.text;
+	case CONSTDEF: return tok.text;
 	case ENUM: return tok.text;
 	case FAULTDEF: return tok.text;
 	case FUNC: return tok.text;
