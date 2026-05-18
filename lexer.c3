@@ -576,7 +576,8 @@ fn Token? Lexer.lex_ident(&self)
 		case "iptr":      return self.emit_token(IPTR);
 		case "uptr":      return self.emit_token(UPTR);
 		case "isz":       return self.emit_token(ISZ);
-		case "sz":       return self.emit_token(USZ);
+		case "sz":        return self.emit_token(ISZ);
+		case "usz":       return self.emit_token(USZ);
 		case "float":     return self.emit_token(FLOAT);
 		case "double":    return self.emit_token(DOUBLE);
 		case "float16":   return self.emit_token(FLOAT16);
