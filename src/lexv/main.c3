@@ -32,7 +32,7 @@ fn int main(String[] args) => @pool()
 		return 0;
 	}
 
-	usz pass, total;
+	sz pass, total;
 	while READ_INPUT: (try header = io::treadline(io::stdin()))
 	{
 		if (!header.starts_with("#"))
@@ -86,7 +86,7 @@ fn bool? validate(String filename, String tokens, bool print_only = false) => @p
 	lexer.init((String)content[..]);
 	while (try tok = lexer.next())
 	{
-		usz len;
+		sz len;
 		switch (tok.type)
 		{
 			case LINE_COMMENT:

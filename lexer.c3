@@ -1,10 +1,10 @@
 module c3::lexer;
 
-import std::io, std::ascii;
+import std::io, std::core::ascii;
 
 faultdef INVALID_CHAR;
 
-enum TokenType : inline ushort
+enum TokenType : ushort
 {
 	INVALID,
 
@@ -65,15 +65,15 @@ struct Token (Printable)
 {
 	TokenType type;
 	String    text;
-	usz       offset;
-	usz       len;
-	usz       ln, col;
-	usz       nl_before;
+	sz       offset;
+	sz       len;
+	sz       ln, col;
+	sz       nl_before;
 }
 
-fn usz? Token.to_format(&self, Formatter *f) @dynamic
+fn sz? Token.to_format(&self, Formatter *f) @dynamic
 {
-	usz n;
+	sz n;
 	n += f.printf("<%s>", self.type)!;
 	if (self.text.len)
 	{
@@ -88,10 +88,10 @@ struct Lexer
 {
 	String input;
 	bool emit_eol;
-	usz  pos;
-	usz  ln, col;
-	usz  token_start;
-	usz  nl_before;
+	sz  pos;
+	sz  ln, col;
+	sz  token_start;
+	sz  nl_before;
 }
 
 fn Lexer* Lexer.init(&self, String input, bool emit_eol = false)
@@ -132,7 +132,7 @@ fn char? Lexer.advance(&self)
 
 fn bool Lexer.at_end(&self) => self.pos >= self.input.len;
 
-fn char Lexer.peek(&self, usz ahead = 0)
+fn char Lexer.peek(&self, sz ahead = 0)
 {
 	if (self.pos + ahead >= self.input.len) return 0;
 	return self.input[self.pos + ahead];
@@ -140,7 +140,7 @@ fn char Lexer.peek(&self, usz ahead = 0)
 
 fn bool Lexer.must(&self, String s)
 {
-	usz n = s.len;
+	sz n = s.len;
 	if (self.pos+n-1 < self.input.len && self.input[self.pos:n] == s)
 	{
 		while (n--) (void)self.advance();
@@ -151,7 +151,7 @@ fn bool Lexer.must(&self, String s)
 
 fn String Lexer.lexeme(&self)
 {
-	usz len = self.pos - self.token_start;
+	sz len = self.pos - self.token_start;
 	return self.input[self.token_start:len];
 }
 
@@ -464,7 +464,7 @@ fn void? Lexer.scan_line_comment(&self)
 
 fn void? Lexer.scan_block_comment(&self)
 {
-	usz depth = 1;
+	sz depth = 1;
 	while (!self.at_end() && depth != 0)
 	{
 		switch
@@ -576,7 +576,7 @@ fn Token? Lexer.lex_ident(&self)
 		case "iptr":      return self.emit_token(IPTR);
 		case "uptr":      return self.emit_token(UPTR);
 		case "isz":       return self.emit_token(ISZ);
-		case "usz":       return self.emit_token(USZ);
+		case "sz":       return self.emit_token(USZ);
 		case "float":     return self.emit_token(FLOAT);
 		case "double":    return self.emit_token(DOUBLE);
 		case "float16":   return self.emit_token(FLOAT16);
@@ -691,7 +691,7 @@ fn Token? ContractLexer.next(&self)
 {
 	if (!self.lexer_init)
 	{
-		usz pos;
+		sz pos;
 		pos = self.splitter.current;
 		while (try next_line = self.splitter.next())
 		{
@@ -739,7 +739,7 @@ fn void test_contract_lexer() @test
 
 module c3::lexer::number;
 
-enum NumberState : inline char (TokenType type) @private
+enum NumberState : char (TokenType type) @private
 {
 	ERROR     { INVALID },
 	INIT      { INVALID },
@@ -757,7 +757,7 @@ enum NumberState : inline char (TokenType type) @private
 	EXPSIGN   { INVALID },  // Exponent sign: + }, -
 }
 
-const NumberState[char.max+1][*] TRANSITIONS @private = {
+const NumberState[char::max+1][*] TRANSITIONS @private = {
 	[NumberState.INIT] = {
 		['1'..'9'] = INTEGER,
 		['0']      = ZERO,
@@ -877,7 +877,7 @@ fn void test_number_classify() @test
 
 module c3::lexer::ident;
 
-enum IdentState : inline char (bool accept) @private {
+enum IdentState : char (bool accept) @private {
 	ERROR_STATE { false },
 	INIT_STATE  { false },
 	IDENT_STATE { true },
@@ -885,7 +885,7 @@ enum IdentState : inline char (bool accept) @private {
 	CONST_STATE { true },
 }
 
-const IdentState[char.max+1][*] TRANSITIONS @private = {
+const IdentState[char::max+1][*] TRANSITIONS @private = {
 	[IdentState.INIT_STATE] = {
 		['A'..'Z'] = CONST_STATE,
 		['a'..'z'] = IDENT_STATE,
@@ -917,14 +917,14 @@ const IdentState[char.max+1][*] TRANSITIONS @private = {
 fn TokenType classify(String s)
 {
 	// Verify order of TokenTypes
-	assert(TokenType.IDENT + 1      == TokenType.TYPE_IDENT);
-	assert(TokenType.IDENT + 2      == TokenType.CONST_IDENT);
-	assert(TokenType.CT_IDENT + 1   == TokenType.CT_TYPE_IDENT);
-	assert(TokenType.CT_IDENT + 2   == TokenType.CT_CONST_IDENT);
-	assert(TokenType.AT_IDENT + 1   == TokenType.AT_TYPE_IDENT);
-	assert(TokenType.AT_IDENT + 2   == TokenType.AT_CONST_IDENT);
-	assert(TokenType.HASH_IDENT + 1 == TokenType.HASH_TYPE_IDENT);
-	assert(TokenType.HASH_IDENT + 2 == TokenType.HASH_CONST_IDENT);
+	assert(TokenType.IDENT.ordinal + 1      == TokenType.TYPE_IDENT.ordinal);
+	assert(TokenType.IDENT.ordinal + 2      == TokenType.CONST_IDENT.ordinal);
+	assert(TokenType.CT_IDENT.ordinal + 1   == TokenType.CT_TYPE_IDENT.ordinal);
+	assert(TokenType.CT_IDENT.ordinal + 2   == TokenType.CT_CONST_IDENT.ordinal);
+	assert(TokenType.AT_IDENT.ordinal + 1   == TokenType.AT_TYPE_IDENT.ordinal);
+	assert(TokenType.AT_IDENT.ordinal + 2   == TokenType.AT_CONST_IDENT.ordinal);
+	assert(TokenType.HASH_IDENT.ordinal + 1 == TokenType.HASH_TYPE_IDENT.ordinal);
+	assert(TokenType.HASH_IDENT.ordinal + 2 == TokenType.HASH_CONST_IDENT.ordinal);
 
 	IdentState state = IdentState.INIT_STATE;
 	foreach (c: s) state = TRANSITIONS[state][c];
@@ -933,10 +933,10 @@ fn TokenType classify(String s)
 		char offset = state.ordinal - IdentState.IDENT_STATE.ordinal;
 		switch (s[0])
 		{
-		case '$': return offset + TokenType.CT_IDENT;
-		case '#': return offset + TokenType.HASH_IDENT;
-		case '@': return offset + TokenType.AT_IDENT;
-		default:  return offset + TokenType.IDENT;
+		case '$': return TokenType::from_ordinal(offset + TokenType.CT_IDENT.ordinal);
+		case '#': return TokenType::from_ordinal(offset + TokenType.HASH_IDENT.ordinal);
+		case '@': return TokenType::from_ordinal(offset + TokenType.AT_IDENT.ordinal);
+		default:  return TokenType::from_ordinal(offset + TokenType.IDENT.ordinal);
 		}
 	}
 	return INVALID;
