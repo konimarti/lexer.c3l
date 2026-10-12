@@ -44,7 +44,7 @@ enum TokenType : ushort
 	USZ, FAULT, ANY, TYPEID,
 
 	// Keywords
-	ALIAS, ASM, ASSERT, ATTRDEF, BITSTRUCT, CONST, CONSTDEF, ENUM,
+	ALIAS, ASM, ASSERT, ATTRDEF, BITSTRUCT, CONST, CONSTDEF, CONSTSET, ENUM,
 	FAULTDEF, FUNC, IMPORT, INTERFACE, MACRO, MODULE, STRUCT, UNION,
 	TYPEDEF, BREAK, CASE, CATCH, CONTINUE, DEFAULT, DEFER, DO, ELSE,
 	EXTERN, FALSE, FOR, FOREACH, FOREACH_R, IF, INLINE, LENGTHOF, NEXTCASE,
@@ -517,6 +517,7 @@ fn Token? Lexer.lex_ident(&self)
 		case "bitstruct": return self.emit_token(BITSTRUCT);
 		case "const":     return self.emit_token(CONST);
 		case "constdef":  return self.emit_token(CONSTDEF);
+		case "constset":  return self.emit_token(CONSTSET);
 		case "enum":      return self.emit_token(ENUM);
 		case "faultdef":  return self.emit_token(FAULTDEF);
 		case "fn":        return self.emit_token(FUNC);
