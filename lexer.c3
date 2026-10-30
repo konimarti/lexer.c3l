@@ -23,7 +23,7 @@ enum TokenType : ushort
 	CT_OR_OP,
 
 	// Punctuation
-	EOS, COLON, SCOPE, COMMA, DOT, DOTDOT, ELLIPSIS,
+	EOS, COLON, SCOPE, COMMA, DOT, DOTDOT, ELLIPSIS, AT, HASH,
 
 	// Structure
 	LBRACE, RBRACE, LBRACKET, RBRACKET, LPAREN, RPAREN, ARROW, IMPLIES,
@@ -40,23 +40,22 @@ enum TokenType : ushort
 
 	// Base Types (base_type_no_generic)
 	VOID, BOOL, CHAR, ICHAR, SHORT, USHORT, INT, UINT, LONG, ULONG, INT128,
-	UINT128, FLOAT, DOUBLE, FLOAT16, BFLOAT16, FLOAT128, IPTR, UPTR, ISZ,
-	USZ, FAULT, ANY, TYPEID,
+	UINT128, FLOAT, DOUBLE, FLOAT16, BFLOAT, FLOAT128, IPTR, UPTR, ISZ,
+	USZ, FAULT, ANY, TYPEID, UNTYPEDLIST,
 
 	// Keywords
-	ALIAS, ASM, ASSERT, ATTRDEF, BITSTRUCT, CONST, CONSTDEF, CONSTSET, ENUM,
+	ALIAS, ASM, ASSERT, ATTRDEF, ATTRMACRO, BITSTRUCT, CONST, CONSTDEF, CONSTSET, ENUM,
 	FAULTDEF, FUNC, IMPORT, INTERFACE, MACRO, MODULE, STRUCT, UNION,
 	TYPEDEF, BREAK, CASE, CATCH, CONTINUE, DEFAULT, DEFER, DO, ELSE,
 	EXTERN, FALSE, FOR, FOREACH, FOREACH_R, IF, INLINE, LENGTHOF, NEXTCASE,
 	NULL, RETURN, STATIC, SWITCH, TLOCAL, TRUE, TRY, VAR, WHILE,
 
-	CT_ALIGNOF, CT_ASSERT, CT_ASSIGNABLE, CT_CASE, CT_DEFAULT, CT_DEFINED,
-	CT_ECHO, CT_ELSE, CT_ENDFOR, CT_ENDFOREACH, CT_ENDIF, CT_ENDSWITCH,
-	CT_ERROR, CT_EVAL, CT_EVALTYPE, CT_EXEC, CT_EXTNAMEOF, CT_FEATURE,
-	CT_FOR, CT_FOREACH, CT_IF, CT_IS_CONST, CT_INCLUDE, CT_KINDOF,
-	CT_NAMEOF, CT_OFFSETOF, CT_QNAMEOF, CT_SIZEOF, CT_STRINGIFY, CT_SWITCH,
-	CT_TYPEFROM, CT_TYPEOF, CT_VAARG, CT_VACONST, CT_VACOUNT, CT_VAEXPR,
-	CT_VAREF, CT_VATYPE, CT_VASPLAT, AT_INLINE, AT_PURE, AT_NOINLINE,
+	// Compile time keywords (C3 0.8)
+	CT_ASSERT, CT_CASE, CT_DEFAULT, CT_DEFINED, CT_ECHO, CT_ELSE, CT_EMBED,
+	CT_ENDFOR, CT_ENDFOREACH, CT_ENDIF, CT_ENDSWITCH, CT_ERROR, CT_EVAL,
+	CT_EXEC, CT_EXPAND, CT_FEAT, CT_FEATURE, CT_FOR, CT_FOREACH, CT_IF,
+	CT_INCLUDE, CT_REFLECT, CT_STRINGIFY, CT_SWITCH, CT_TYPEFROM, CT_TYPEOF,
+	CT_VAARG, AT_INLINE, AT_PURE, AT_NOINLINE,
 
 	EOL, EOF,
 }
@@ -67,8 +66,15 @@ struct Token (Printable)
 	String    text;
 	sz       offset;
 	sz       len;
+	<* Line and byte column where the token starts, both 1-based. *>
 	sz       ln, col;
+	<* Newlines between the previous token and this one. *>
 	sz       nl_before;
+	<*
+	 A string, char or bytes literal, block comment or contract that is never
+	 closed. The token runs to the end of its line (`"…"`, `'…'`) or the input.
+	*>
+	bool     unterminated;
 }
 
 fn sz? Token.to_format(&self, Formatter *f) @dynamic
@@ -91,7 +97,10 @@ struct Lexer
 	sz  pos;
 	sz  ln, col;
 	sz  token_start;
+	sz  token_ln, token_col;
+	sz  token_nl;
 	sz  nl_before;
+	bool unterminated;
 }
 
 fn Lexer* Lexer.init(&self, String input, bool emit_eol = false)
@@ -162,15 +171,16 @@ fn Token Lexer.emit_token(&self, TokenType type)
 {
 	String lexeme = self.lexeme();
 	Token tok = {
-		.type      = type,
-		.offset    = self.token_start,
-		.len       = lexeme.len,
-		.ln        = self.ln,
-		.col       = self.col,
-		.text      = lexeme,
-		.nl_before = self.nl_before
+		.type         = type,
+		.offset       = self.token_start,
+		.len          = lexeme.len,
+		.ln           = self.token_ln,
+		.col          = self.token_col,
+		.text         = lexeme,
+		.nl_before    = self.token_nl,
+		.unterminated = self.unterminated,
 	};
-	self.nl_before = 0;
+	self.unterminated = false;
 	return tok;
 }
 
@@ -182,9 +192,15 @@ fn Token? Lexer.next(&self)
 	char c;
 	TokenType type;
 
+	// Newlines inside the previous token belong to it, not to the gap before this one.
+	self.nl_before = 0;
 	self.scan_whitespace()!;
 
 	self.token_start = self.pos;
+	self.token_ln = self.ln;
+	self.token_col = self.col;
+	self.token_nl = self.nl_before;
+	self.unterminated = false;
 	if (self.at_end()) return io::EOF~;
 
 	switch (c = self.peek())
@@ -362,37 +378,37 @@ fn Token? Lexer.next(&self)
 
 		case '@':
 		case '#':
-			switch
+			// A shebang is only a comment on the first line.
+			if (self.pos == 0 && self.must("#!"))
 			{
-				case self.must("#!"):
-					self.scan_line_comment()!;
-					return self.emit_token(LINE_COMMENT);
-				case self.must("#"):
-				case self.must("@"):
-					return self.lex_at_or_hash_ident()!;
-				default: return INVALID_CHAR~;
+				self.scan_line_comment()!;
+				return self.emit_token(LINE_COMMENT);
 			}
+			self.advance()!;
+			// On its own (`@` in `@[...]`, `#` in `#[...]`) it is punctuation.
+			if (!is_ident(self.peek())) return self.emit_token(c == '@' ? AT : HASH);
+			return self.lex_at_or_hash_ident()!;
 
 		case 'b':
 		case 'x':
 			switch
 			{
-				case self.must("b64\""): self.scan_until('"')!;
-				case self.must("b64'"):  self.scan_until('\'')!;
-				case self.must("b64`"):  self.scan_until('`')!;
-				case self.must("x\""):   self.scan_until('"')!;
-				case self.must("x'"):    self.scan_until('\'')!;
-				case self.must("x`"):    self.scan_until('`')!;
+				case self.must("b64\""): self.scan_until('"');
+				case self.must("b64'"):  self.scan_until('\'');
+				case self.must("b64`"):  self.scan_until('`');
+				case self.must("x\""):   self.scan_until('"');
+				case self.must("x'"):    self.scan_until('\'');
+				case self.must("x`"):    self.scan_until('`');
 				default: return self.lex_ident()!;
 			}
 			return self.emit_token(BYTES);
 
 		case '\'':
-			self.scan_string()!;
+			self.scan_string();
 			return self.emit_token(CHAR_LITERAL);
 		case '"':
 		case '`':
-			self.scan_string()!;
+			self.scan_string();
 			return self.emit_token(STRING);
 
 		case '\n':
@@ -402,11 +418,11 @@ fn Token? Lexer.next(&self)
 		default:
 			if (is_digit(c)) return self.lex_number()!;
 			if (is_ident(c)) return self.lex_ident()!;
-			@pool() {
-			self.report_error(string::tformat(
-				"encountered invalid char: ""'%c'", c).tescape());
-			};
-			return INVALID_CHAR~;
+			// Not the start of any token. Take the whole UTF-8 character, so a
+			// multi-byte one (a pasted smart quote) is one INVALID token, not several.
+			self.advance()!;
+			while (!self.at_end() && (self.peek() & 0xC0) == 0x80) self.advance()!;
+			return self.emit_token(INVALID);
 	}
 }
 
@@ -420,37 +436,48 @@ fn void? Lexer.scan_whitespace(&self)
 	}
 }
 
-fn void? Lexer.scan_until(&self, char until)
+<*
+ Scan up to and including `until`; bytes literals may span lines. Unterminated
+ when the input ends first.
+*>
+fn void Lexer.scan_until(&self, char until)
 {
 	while (!self.at_end())
 	{
-		if (until == self.advance()!) return;
+		if (until == self.advance()!!) return;
 	}
+	self.unterminated = true;
 }
 
-fn void? Lexer.scan_string(&self)
+<*
+ Scan a string or char literal starting at its opening quote. `"…"` and `'…'`
+ end at their line: one that reaches a newline (or the end of the input) has
+ lost its closing quote, and stops there instead of swallowing the code that
+ follows. A raw `` `…` `` string may span lines, and a doubled backtick in it
+ is a literal backtick.
+*>
+fn void Lexer.scan_string(&self)
 {
-	char quote, c;
-	quote = self.peek();
-	switch (quote)
+	char quote = self.peek();
+	(void)self.advance(); // Opening quote
+	while (!self.at_end())
 	{
-		case '"' :
-		case '\'':
-			self.advance()!; // Consume '"' or '\''
-			while (!self.at_end() && (c = self.peek()) && c != quote)
-			{
-				if (c == '\\') self.advance()!; // Consume '\'
-				self.advance()!;
-			}
-			self.advance()!; // Consume '"' or '\''
-		case '`' :
-			self.advance()!; // Consume '`'
-			while(!self.at_end() && (c = self.peek()) && c != quote)
-			{
-				self.advance()!;
-			}
-			self.advance()!; // Consume '`'
+		char c = self.peek();
+		if (quote == '`')
+		{
+			(void)self.advance();
+			if (c != '`') continue;
+			if (self.peek() != '`') return;
+			(void)self.advance(); // `` is an escaped backtick
+			continue;
+		}
+		if (c == '\n') break;
+		(void)self.advance();
+		if (c == quote) return;
+		// An escape takes the next character with it, but never the line end.
+		if (c == '\\' && !self.at_end() && self.peek() != '\n') (void)self.advance();
 	}
+	self.unterminated = true;
 }
 
 fn void? Lexer.scan_line_comment(&self)
@@ -474,23 +501,32 @@ fn void? Lexer.scan_block_comment(&self)
 			default: self.advance()!;
 		}
 	}
+	if (depth != 0) self.unterminated = true;
 }
 
 fn void? Lexer.scan_contract(&self)
 {
-	while (!self.at_end() && !self.must("*>")) self.advance()!;
+	while (!self.at_end())
+	{
+		if (self.must("*>")) return;
+		self.advance()!;
+	}
+	self.unterminated = true;
 }
 
 fn Token? Lexer.lex_number(&self)
 {
 	char c, prev;
 	int i = 0;
+	bool hex = self.peek() == '0' && (self.peek(1) == 'x' || self.peek(1) == 'X');
 	while (!self.at_end() && (c = self.peek())
 		&& (is_digit(c) || c == '-' || (i > 0 && (ascii::is_xdigit(c) || ascii::is_bdigit(c) || ascii::is_odigit(c)
-			|| "+.eEpPbBxXoOuUlLifd_".contains_char(c))))
+			|| "+.eEpPbBxXoOuUlLifdDF_".contains_char(c))))
 	)
 	{
-		if ("+-".contains_char(c) && !("eEpP".contains_char(prev))) break;
+		// A sign belongs to the number only after its exponent marker: `e` in a
+		// decimal literal, `p` in a hex one (where `e` is a digit: 0xFE-1).
+		if ("+-".contains_char(c) && !(hex ? "pP" : "eE").contains_char(prev)) break;
 		if (c == '.' && c == self.peek(1)) break;
 		self.advance()!;
 		prev = c;
@@ -514,6 +550,7 @@ fn Token? Lexer.lex_ident(&self)
 		// Top-Level Explicit Keywords
 		case "alias":     return self.emit_token(ALIAS);
 		case "attrdef":   return self.emit_token(ATTRDEF);
+		case "attrmacro": return self.emit_token(ATTRMACRO);
 		case "bitstruct": return self.emit_token(BITSTRUCT);
 		case "const":     return self.emit_token(CONST);
 		case "constdef":  return self.emit_token(CONSTDEF);
@@ -576,16 +613,16 @@ fn Token? Lexer.lex_ident(&self)
 		case "uint128":   return self.emit_token(UINT128);
 		case "iptr":      return self.emit_token(IPTR);
 		case "uptr":      return self.emit_token(UPTR);
-		case "isz":       return self.emit_token(ISZ);
 		case "sz":        return self.emit_token(ISZ);
 		case "usz":       return self.emit_token(USZ);
 		case "float":     return self.emit_token(FLOAT);
 		case "double":    return self.emit_token(DOUBLE);
 		case "float16":   return self.emit_token(FLOAT16);
-		case "bfloat16":  return self.emit_token(BFLOAT16);
+		case "bfloat":    return self.emit_token(BFLOAT);
 		case "float128":  return self.emit_token(FLOAT128);
 		case "fault":     return self.emit_token(FAULT);
 		case "typeid":    return self.emit_token(TYPEID);
+		case "untypedlist": return self.emit_token(UNTYPEDLIST);
 
 		default:
 			return self.emit_token(ident::classify(str));
@@ -603,46 +640,34 @@ fn Token? Lexer.lex_compile_time(&self)
 	String str = self.lexeme();
 	switch (str)
 	{
-		// Compile time
-		case "$alignof":    return self.emit_token(CT_ALIGNOF);
+		// Compile time keywords (C3 0.8)
 		case "$assert":     return self.emit_token(CT_ASSERT);
-		case "$assignable": return self.emit_token(CT_ASSIGNABLE);
 		case "$case":       return self.emit_token(CT_CASE);
 		case "$default":    return self.emit_token(CT_DEFAULT);
 		case "$defined":    return self.emit_token(CT_DEFINED);
 		case "$echo":       return self.emit_token(CT_ECHO);
 		case "$else":       return self.emit_token(CT_ELSE);
+		case "$embed":      return self.emit_token(CT_EMBED);
 		case "$endfor":     return self.emit_token(CT_ENDFOR);
 		case "$endforeach": return self.emit_token(CT_ENDFOREACH);
 		case "$endif":      return self.emit_token(CT_ENDIF);
 		case "$endswitch":  return self.emit_token(CT_ENDSWITCH);
 		case "$error":      return self.emit_token(CT_ERROR);
 		case "$eval":       return self.emit_token(CT_EVAL);
-		case "$evaltype":   return self.emit_token(CT_EVALTYPE);
 		case "$exec":       return self.emit_token(CT_EXEC);
-		case "$extnameof":  return self.emit_token(CT_EXTNAMEOF);
+		case "$expand":     return self.emit_token(CT_EXPAND);
+		case "$feat":       return self.emit_token(CT_FEAT);
 		case "$feature":    return self.emit_token(CT_FEATURE);
 		case "$for":        return self.emit_token(CT_FOR);
 		case "$foreach":    return self.emit_token(CT_FOREACH);
 		case "$if":         return self.emit_token(CT_IF);
-		case "$is_const":   return self.emit_token(CT_IS_CONST);
 		case "$include":    return self.emit_token(CT_INCLUDE);
-		case "$kindof":     return self.emit_token(CT_KINDOF);
-		case "$nameof":     return self.emit_token(CT_NAMEOF);
-		case "$offsetof":   return self.emit_token(CT_OFFSETOF);
-		case "$qnameof":    return self.emit_token(CT_QNAMEOF);
-		case "$sizeof":     return self.emit_token(CT_SIZEOF);
+		case "$reflect":    return self.emit_token(CT_REFLECT);
 		case "$stringify":  return self.emit_token(CT_STRINGIFY);
 		case "$switch":     return self.emit_token(CT_SWITCH);
-		case "$typefrom":   return self.emit_token(CT_TYPEFROM);
-		case "$typeof":     return self.emit_token(CT_TYPEOF);
+		case "$Typefrom":   return self.emit_token(CT_TYPEFROM);
+		case "$Typeof":     return self.emit_token(CT_TYPEOF);
 		case "$vaarg":      return self.emit_token(CT_VAARG);
-		case "$vaconst":    return self.emit_token(CT_VACONST);
-		case "$vacount":    return self.emit_token(CT_VACOUNT);
-		case "$vaexpr":     return self.emit_token(CT_VAEXPR);
-		case "$varef":      return self.emit_token(CT_VAREF);
-		case "$vasplat":    return self.emit_token(CT_VASPLAT);
-		case "$vatype":     return self.emit_token(CT_VATYPE);
 
 		default:
 			return self.emit_token(ident::classify(str));
@@ -739,24 +764,139 @@ fn void test_contract_lexer() @test
 	assert(dl.intro.trim() == "Check if a character is in a set.");
 }
 
+<*
+ Lex `input` and return its tokens (temp-allocated).
+*>
+fn Token[] lex_all(String input) @private
+{
+	Token[] out = mem::temp_array(Token, input.len + 1);
+	sz n = 0;
+	Lexer lex;
+	lex.init(input);
+	while (try tok = lex.next()) out[n++] = tok;
+	assert(lex.at_end(), "the lexer must reach the end of the input");
+	return out[:n];
+}
+
+fn void test_unterminated_string_stops_at_line_end() @test
+{
+	Token[] toks = lex_all("a = \"abc;\nint x;");
+	assert(toks[2].type == STRING && toks[2].unterminated);
+	assert(toks[2].text == "\"abc;", "got %s", toks[2].text);
+	assert(toks[3].type == INT && toks[3].ln == 2 && toks[3].col == 1, "the next line lexes normally");
+}
+
+fn void test_unterminated_literals_at_eof_are_tokens() @test
+{
+	foreach (src : (String[]){ "\"abc", "'a", "`abc", "\"abc\\", "x\"00", "/* x", "<* x" })
+	{
+		Token[] toks = lex_all(src);
+		assert(toks.len == 1 && toks[0].unterminated && toks[0].text == src, "for %s", src);
+	}
+}
+
+fn void test_closed_literals_are_terminated() @test
+{
+	foreach (src : (String[]){ "\"a\\\"b\"", "'a'", "`a``b`", "x\"00\n11\"", "/* /* */ */", "<* x *>" })
+	{
+		Token[] toks = lex_all(src);
+		assert(toks.len == 1 && !toks[0].unterminated && toks[0].text == src, "for %s", src);
+	}
+}
+
+fn void test_escape_never_takes_the_newline() @test
+{
+	Token[] toks = lex_all("\"a\\\nb\"");
+	assert(toks[0].type == STRING && toks[0].unterminated && toks[0].text == "\"a\\");
+}
+
+fn void test_invalid_utf8_char_is_one_token() @test
+{
+	Token[] toks = lex_all("x = \xe2\x80\x9cy;");
+	assert(toks[2].type == INVALID && toks[2].len == 3);
+	assert(toks[3].type == IDENT && toks[3].text == "y");
+}
+
+fn void test_hex_e_is_not_an_exponent() @test
+{
+	Token[] toks = lex_all("0xFE-1 1e-5");
+	assert(toks.len == 4, "got %d tokens", toks.len);
+	assert(toks[0].type == INTEGER && toks[1].type == MINUS && toks[2].type == INTEGER);
+	assert(toks[3].type == REAL && toks[3].text == "1e-5");
+}
+
+fn void test_compile_time_keywords_08() @test
+{
+	Token[] toks = lex_all("$Typeof $Typefrom $feat $feature $reflect $embed $expand $typeof $sizeof");
+	TokenType[] want = { CT_TYPEOF, CT_TYPEFROM, CT_FEAT, CT_FEATURE, CT_REFLECT, CT_EMBED, CT_EXPAND, CT_IDENT, CT_IDENT };
+	foreach (i, t : want) assert(toks[i].type == t, "token %d: got %s", i, toks[i].type);
+}
+
+fn void test_type_keywords_08() @test
+{
+	Token[] toks = lex_all("bfloat untypedlist bfloat16 isz sz attrmacro");
+	TokenType[] want = { BFLOAT, UNTYPEDLIST, IDENT, IDENT, ISZ, ATTRMACRO };
+	foreach (i, t : want) assert(toks[i].type == t, "token %d: got %s", i, toks[i].type);
+}
+
+fn void test_bare_at_and_hash() @test
+{
+	Token[] toks = lex_all("@ # @foo #bar");
+	TokenType[] want = { AT, HASH, AT_IDENT, HASH_IDENT };
+	foreach (i, t : want) assert(toks[i].type == t, "token %d: got %s", i, toks[i].type);
+}
+
+fn void test_shebang_only_on_first_line() @test
+{
+	assert(lex_all("#!/usr/bin/env c3\nx")[0].type == LINE_COMMENT);
+	Token[] toks = lex_all("a #!b");
+	assert(toks[1].type == HASH && toks[2].type == BANG);
+}
+
+fn void test_token_position_is_its_start() @test
+{
+	Token[] toks = lex_all("a\n  /* x\n y */ b");
+	assert(toks[1].ln == 2 && toks[1].col == 3, "comment starts at 2:3, got %d:%d", toks[1].ln, toks[1].col);
+	assert(toks[1].nl_before == 1);
+	assert(toks[2].ln == 3 && toks[2].nl_before == 0, "newlines inside the comment are not before `b`");
+}
+
 module c3::lexer::number;
 
+<*
+ Number literal states, following c3c: an `_` must sit between two digits, a
+ base prefix needs at least one digit, integer suffixes are `u`, `l`, `ul`,
+ `ll` and `ull` (any case), and reals take an optional `f`/`d` (any case).
+*>
 enum NumberState : char (TokenType type) @private
 {
-	ERROR     { INVALID },
-	INIT      { INVALID },
-	INTEGER   { INTEGER },
-	ZERO      { INTEGER },
-	HEXINT    { INTEGER },
-	OCTINT    { INTEGER },
-	BININT    { INTEGER },
-	INTSUFFIX { INTEGER },  // Integer suffix: ([iu](8|16|32|64|128)|[uU][lL]|[lL])
-	REAL      { REAL },
-	INTDEC    { REAL },     // Integer decimal: INT "." INT
-	EDIGITS   { REAL },     // Exponent digits
-	HEXDEC    { INVALID },  // Hexadecimal "decimal": HEXINT "." HEXINT
-	EXPONENT  { INVALID },  // E-notation [eEpP]
-	EXPSIGN   { INVALID },  // Exponent sign: + }, -
+	ERROR      { INVALID },
+	INIT       { INVALID },
+	INTEGER    { INTEGER },
+	ZERO       { INTEGER },
+	HEXSTART   { INVALID },  // "0x" with no digit yet
+	HEXINT     { INTEGER },
+	OCTSTART   { INVALID },
+	OCTINT     { INTEGER },
+	BINSTART   { INVALID },
+	BININT     { INTEGER },
+	INT_US     { INVALID },  // "_" inside a decimal integer
+	HEX_US     { INVALID },
+	OCT_US     { INVALID },
+	BIN_US     { INVALID },
+	SUFFIX_U   { INTEGER },  // u
+	SUFFIX_L   { INTEGER },  // l
+	SUFFIX_UL  { INTEGER },  // ul
+	SUFFIX_END { INTEGER },  // ll, ull
+	REAL       { REAL },     // after a real suffix
+	DOT        { REAL },     // INT "." (c3c accepts `1.`)
+	INTDEC     { REAL },     // INT "." INT
+	DEC_US     { INVALID },  // "_" inside the fraction
+	EDIGITS    { REAL },     // Exponent digits
+	HEXDEC     { INVALID },  // Hexadecimal "decimal": HEXINT "." HEXINT
+	HEXDEC_US  { INVALID },
+	EXPONENT   { INVALID },  // E-notation [eEpP]
+	EXPSIGN    { INVALID },  // Exponent sign: + or -
 }
 
 const NumberState[char::max+1][*] TRANSITIONS @private = {
@@ -768,64 +908,111 @@ const NumberState[char::max+1][*] TRANSITIONS @private = {
 	},
 	[NumberState.INTEGER] = {
 		['0'..'9'] = INTEGER,
-		['_']      = INTEGER,
+		['_']      = INT_US,
 		['e']      = EXPONENT,  ['E'] = EXPONENT,
 		['d']      = REAL,      ['f'] = REAL,
-		['i']      = INTSUFFIX,
-		['u']      = INTSUFFIX, ['U'] = INTSUFFIX,
-		['l']      = INTSUFFIX, ['L'] = INTSUFFIX,
-		['.']      = INTDEC,
+		['D']      = REAL,      ['F'] = REAL,
+		['u']      = SUFFIX_U,  ['U'] = SUFFIX_U,
+		['l']      = SUFFIX_L,  ['L'] = SUFFIX_L,
+		['.']      = DOT,
 	},
 	[NumberState.ZERO] = {
 		['0'..'9'] = INTEGER,
-		['_']      = INTEGER,
-		['b']      = BININT,    ['B'] = BININT,
-		['o']      = OCTINT,    ['O'] = OCTINT,
-		['x']      = HEXINT,    ['X'] = HEXINT,
+		['_']      = INT_US,
+		['b']      = BINSTART,  ['B'] = BINSTART,
+		['o']      = OCTSTART,  ['O'] = OCTSTART,
+		['x']      = HEXSTART,  ['X'] = HEXSTART,
 		['e']      = EXPONENT,  ['E'] = EXPONENT,
 		['d']      = REAL,      ['f'] = REAL,
-		['i']      = INTSUFFIX,
-		['u']      = INTSUFFIX, ['U'] = INTSUFFIX,
-		['l']      = INTSUFFIX, ['L'] = INTSUFFIX,
-		['.']      = INTDEC,
+		['D']      = REAL,      ['F'] = REAL,
+		['u']      = SUFFIX_U,  ['U'] = SUFFIX_U,
+		['l']      = SUFFIX_L,  ['L'] = SUFFIX_L,
+		['.']      = DOT,
+	},
+	[NumberState.INT_US] = {
+		['0'..'9'] = INTEGER,
+		['.']      = DOT,
+	},
+	[NumberState.HEXSTART] = {
+		['0'..'9'] = HEXINT,
+		['a'..'f'] = HEXINT,
+		['A'..'F'] = HEXINT,
 	},
 	[NumberState.HEXINT] = {
 		['0'..'9'] = HEXINT,
 		['a'..'f'] = HEXINT,
 		['A'..'F'] = HEXINT,
-		['_']      = HEXINT,
+		['_']      = HEX_US,
 		['p']      = EXPONENT,  ['P'] = EXPONENT,
-		['i']      = INTSUFFIX,
-		['u']      = INTSUFFIX, ['U'] = INTSUFFIX,
-		['l']      = INTSUFFIX, ['L'] = INTSUFFIX,
+		['u']      = SUFFIX_U,  ['U'] = SUFFIX_U,
+		['l']      = SUFFIX_L,  ['L'] = SUFFIX_L,
 		['.']      = HEXDEC,
+	},
+	[NumberState.HEX_US] = {
+		['0'..'9'] = HEXINT,
+		['a'..'f'] = HEXINT,
+		['A'..'F'] = HEXINT,
+	},
+	[NumberState.OCTSTART] = {
+		['0'..'7'] = OCTINT,
 	},
 	[NumberState.OCTINT] = {
 		['0'..'7'] = OCTINT,
-		['_']      = OCTINT,
-		['i']      = INTSUFFIX,
-		['u']      = INTSUFFIX, ['U'] = INTSUFFIX,
-		['l']      = INTSUFFIX, ['L'] = INTSUFFIX,
+		['_']      = OCT_US,
+		['u']      = SUFFIX_U,  ['U'] = SUFFIX_U,
+		['l']      = SUFFIX_L,  ['L'] = SUFFIX_L,
+	},
+	[NumberState.OCT_US] = {
+		['0'..'7'] = OCTINT,
+	},
+	[NumberState.BINSTART] = {
+		['0'..'1'] = BININT,
 	},
 	[NumberState.BININT] = {
 		['0'..'1'] = BININT,
-		['_']      = BININT,
-		['i']      = INTSUFFIX,
-		['u']      = INTSUFFIX, ['U'] = INTSUFFIX,
-		['l']      = INTSUFFIX, ['L'] = INTSUFFIX,
+		['_']      = BIN_US,
+		['u']      = SUFFIX_U,  ['U'] = SUFFIX_U,
+		['l']      = SUFFIX_L,  ['L'] = SUFFIX_L,
+	},
+	[NumberState.BIN_US] = {
+		['0'..'1'] = BININT,
+	},
+	[NumberState.SUFFIX_U] = {
+		['l']      = SUFFIX_UL, ['L'] = SUFFIX_UL,
+	},
+	[NumberState.SUFFIX_L] = {
+		['l']      = SUFFIX_END, ['L'] = SUFFIX_END,
+	},
+	[NumberState.SUFFIX_UL] = {
+		['l']      = SUFFIX_END, ['L'] = SUFFIX_END,
+	},
+	[NumberState.DOT] = {
+		['0'..'9'] = INTDEC,
+		['e']      = EXPONENT, ['E'] = EXPONENT,
+		['d']      = REAL,     ['f'] = REAL,
+		['D']      = REAL,     ['F'] = REAL,
+	},
+	[NumberState.INTDEC] = {
+		['0'..'9'] = INTDEC,
+		['_']      = DEC_US,
+		['e']      = EXPONENT, ['E'] = EXPONENT,
+		['d']      = REAL,     ['f'] = REAL,
+		['D']      = REAL,     ['F'] = REAL,
+	},
+	[NumberState.DEC_US] = {
+		['0'..'9'] = INTDEC,
 	},
 	[NumberState.HEXDEC] = {
 		['0'..'9'] = HEXDEC,
 		['a'..'f'] = HEXDEC,
 		['A'..'F'] = HEXDEC,
-		['_']      = HEXDEC,
+		['_']      = HEXDEC_US,
 		['p']      = EXPONENT,  ['P'] = EXPONENT,
 	},
-	[NumberState.INTDEC] = {
-		['0'..'9'] = INTDEC,
-		['_']      = INTDEC,
-		['e']      = EXPONENT, ['E'] = EXPONENT,
-		['d']      = REAL,     ['f'] = REAL,
+	[NumberState.HEXDEC_US] = {
+		['0'..'9'] = HEXDEC,
+		['a'..'f'] = HEXDEC,
+		['A'..'F'] = HEXDEC,
 	},
 	[NumberState.EXPONENT] = {
 		['0'..'9'] = EDIGITS,
@@ -835,14 +1022,10 @@ const NumberState[char::max+1][*] TRANSITIONS @private = {
 	[NumberState.EDIGITS] = {
 		['0'..'9'] = EDIGITS,
 		['d']      = REAL, ['f'] = REAL,
+		['D']      = REAL, ['F'] = REAL,
 	},
 	[NumberState.EXPSIGN] = {
 		['0'..'9'] = EDIGITS,
-	},
-	[NumberState.INTSUFFIX] = {
-		['1'..'4'] = INTSUFFIX,
-		['6']      = INTSUFFIX, ['8'] = INTSUFFIX,
-		['l']      = INTSUFFIX, ['L'] = INTSUFFIX,
 	},
 };
 
@@ -861,7 +1044,7 @@ fn void test_number_classify() @test
 	assert(classify("-1")         ==  INTEGER);
 	assert(classify("123")        ==  INTEGER);
 	assert(classify("123ul")      ==  INTEGER);
-	assert(classify("123i32")     ==  INTEGER);
+	assert(classify("123i32")     ==  INVALID);
 	assert(classify("0xdeadbeeF") ==  INTEGER);
 	assert(classify("0xcafeUL")   ==  INTEGER);
 	assert(classify("0b101UL")    ==  INTEGER);
@@ -875,6 +1058,28 @@ fn void test_number_classify() @test
 	assert(classify("123.0e-10")  ==   REAL);
 	assert(classify("123f")       ==   REAL);
 	assert(classify("123d")       ==   REAL);
+	assert(classify("1.0F")       ==   REAL);
+	assert(classify("2D")         ==   REAL);
+	assert(classify("1.")         ==   REAL);
+	assert(classify("1.e5")       ==   REAL);
+	assert(classify("1_.5")       ==   REAL);
+	assert(classify("0x1.p1")     ==   REAL);
+	assert(classify("1uLL")       ==   INTEGER);
+	assert(classify("1Ll")        ==   INTEGER);
+	assert(classify("1_000")      ==   INTEGER);
+	assert(classify("0x1_F")      ==   INTEGER);
+	assert(classify("1lu")        ==   INVALID);
+	assert(classify("1u8")        ==   INVALID);
+	assert(classify("1__2")       ==   INVALID);
+	assert(classify("1_")         ==   INVALID);
+	assert(classify("0x")         ==   INVALID);
+	assert(classify("0x_1")       ==   INVALID);
+	assert(classify("0b_1")       ==   INVALID);
+	assert(classify("1._5")       ==   INVALID);
+	assert(classify("1e1_0")      ==   INVALID);
+	assert(classify("1.0u")       ==   INVALID);
+	assert(classify("1e")         ==   INVALID);
+	assert(classify("0x1p")       ==   INVALID);
 }
 
 module c3::lexer::ident;

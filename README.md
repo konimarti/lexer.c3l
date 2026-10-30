@@ -34,6 +34,13 @@ The lexer also supports language constructs such as **contract blocks** and
 The lexer returns a token for line comments (`LINE_COMMENT`), block comments
 (`BLOCK_COMMENT`), and contracts (`CONTRACT`).
 
+Malformed input never stops the lexer: `next()` only fails at the end of the
+input. A character that cannot start a token comes back as one `INVALID` token
+(a whole UTF-8 character, not a byte at a time). A string, char or bytes literal,
+block comment or contract that is never closed is still returned as a token with
+`unterminated` set; a `"…"` or `'…'` literal stops at the end of its line, so the
+code after it lexes normally. Each token's `ln`/`col` is where it starts.
+
 If you want to step into the contracts and lex them too, then use the lexeme of
 the `CONTRACT` token with the `ContractLexer`:
 
