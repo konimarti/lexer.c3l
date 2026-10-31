@@ -132,6 +132,8 @@ fn bool? validate(String filename, String tokens, bool print_only = false) => @p
 
 fn String token_to_string(Token tok, bool doc_mode = false)
 {
+	// c3c reports a literal that is never closed as an invalid token.
+	if (tok.unterminated) return "INVALID_TOKEN";
 	switch (tok.type)
 	{
 	case INVALID: return "INVALID_TOKEN";
@@ -185,6 +187,8 @@ fn String token_to_string(Token tok, bool doc_mode = false)
 	case DOT: return ".";
 	case DOTDOT: return "..";
 	case ELLIPSIS: return "...";
+	case AT: return "@";
+	case HASH: return "#";
 	case LBRACE: return "{";
 	case RBRACE: return "}";
 	case LBRACKET: return "[";
@@ -216,9 +220,11 @@ fn String token_to_string(Token tok, bool doc_mode = false)
 	case ASM: return tok.text;
 	case ASSERT: return tok.text;
 	case ATTRDEF: return tok.text;
+	case ATTRMACRO: return tok.text;
 	case BITSTRUCT: return tok.text;
 	case CONST: return tok.text;
 	case CONSTDEF: return tok.text;
+	case CONSTSET: return tok.text;
 	case ENUM: return tok.text;
 	case FAULTDEF: return tok.text;
 	case FUNC: return tok.text;
@@ -270,7 +276,7 @@ fn String token_to_string(Token tok, bool doc_mode = false)
 	case FLOAT: return tok.text;
 	case DOUBLE: return tok.text;
 	case FLOAT16: return tok.text;
-	case BFLOAT16: return tok.text;
+	case BFLOAT: return tok.text;
 	case FLOAT128: return tok.text;
 	case IPTR: return tok.text;
 	case UPTR: return tok.text;
@@ -279,12 +285,11 @@ fn String token_to_string(Token tok, bool doc_mode = false)
 	case FAULT: return tok.text;
 	case ANY: return tok.text;
 	case TYPEID: return tok.text;
+	case UNTYPEDLIST: return tok.text;
 	case CT_CONST_IDENT: return "CT_CONST_IDENT";
 	case CT_TYPE_IDENT: return "CT_TYPE_IDENT";
 	case CT_IDENT: return "CT_IDENT";
-	case CT_ALIGNOF: return tok.text;
 	case CT_ASSERT: return tok.text;
-	case CT_ASSIGNABLE: return tok.text;
 	case CT_CASE: return tok.text;
 	case CT_DEFAULT: return tok.text;
 	case CT_DEFINED: return tok.text;
@@ -296,31 +301,21 @@ fn String token_to_string(Token tok, bool doc_mode = false)
 	case CT_ENDSWITCH: return tok.text;
 	case CT_ERROR: return tok.text;
 	case CT_EVAL: return tok.text;
-	case CT_EVALTYPE: return tok.text;
 	case CT_EXEC: return tok.text;
-	case CT_EXTNAMEOF: return tok.text;
 	case CT_FEATURE: return tok.text;
 	case CT_FOR: return tok.text;
 	case CT_FOREACH: return tok.text;
 	case CT_IF: return tok.text;
-	case CT_IS_CONST: return tok.text;
 	case CT_INCLUDE: return tok.text;
-	case CT_KINDOF: return tok.text;
-	case CT_NAMEOF: return tok.text;
-	case CT_OFFSETOF: return tok.text;
-	case CT_QNAMEOF: return tok.text;
-	case CT_SIZEOF: return tok.text;
 	case CT_STRINGIFY: return tok.text;
 	case CT_SWITCH: return tok.text;
 	case CT_TYPEFROM: return tok.text;
 	case CT_TYPEOF: return tok.text;
 	case CT_VAARG: return tok.text;
-	case CT_VACONST: return tok.text;
-	case CT_VACOUNT: return tok.text;
-	case CT_VAEXPR: return tok.text;
-	case CT_VAREF: return tok.text;
-	case CT_VASPLAT: return tok.text;
-	case CT_VATYPE: return tok.text;
+	case CT_EMBED: return tok.text;
+	case CT_EXPAND: return tok.text;
+	case CT_FEAT: return tok.text;
+	case CT_REFLECT: return tok.text;
 	// TODO: Yacc grammar is updated but c3c lexer still lexes those tokens
 	// as MACRO_IDENT. Fix tests.
 	// case AT_INLINE: return tok.text;
