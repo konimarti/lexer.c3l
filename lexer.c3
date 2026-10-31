@@ -518,6 +518,7 @@ fn Token? Lexer.lex_number(&self)
 {
 	char c, prev;
 	int i = 0;
+	bool dot, expo;
 	bool hex = self.peek() == '0' && (self.peek(1) == 'x' || self.peek(1) == 'X');
 	while (!self.at_end() && (c = self.peek())
 		&& (is_digit(c) || c == '-' || (i > 0 && (ascii::is_xdigit(c) || ascii::is_bdigit(c) || ascii::is_odigit(c)
@@ -528,6 +529,11 @@ fn Token? Lexer.lex_number(&self)
 		// decimal literal, `p` in a hex one (where `e` is a digit: 0xFE-1).
 		if ("+-".contains_char(c) && !(hex ? "pP" : "eE").contains_char(prev)) break;
 		if (c == '.' && c == self.peek(1)) break;
+		// Only one `.`, and none after the exponent: `90.0.to_radians()` is a
+		// float followed by a member access.
+		if (c == '.' && (dot || expo)) break;
+		if (c == '.') dot = true;
+		if ((hex ? "pP" : "eE").contains_char(c)) expo = true;
 		self.advance()!;
 		prev = c;
 		i++;
@@ -776,6 +782,17 @@ fn Token[] lex_all(String input) @private
 	while (try tok = lex.next()) out[n++] = tok;
 	assert(lex.at_end(), "the lexer must reach the end of the input");
 	return out[:n];
+}
+
+fn void test_number_then_member_access() @test
+{
+	String[3] srcs = { "90.0.to_radians()", "1e5.foo", "0x1p3.foo" };
+	foreach (src : srcs)
+	{
+		Token[] toks = lex_all(src);
+		assert(toks[0].type == REAL, "%s: got %s", src, toks[0].type);
+		assert(toks[1].type == DOT && toks[2].type == IDENT, "%s: member access is lexed on its own", src);
+	}
 }
 
 fn void test_unterminated_string_stops_at_line_end() @test
