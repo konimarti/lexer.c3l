@@ -115,10 +115,68 @@ fn void Lexer.report_error(&self, String msg)
 	io::eprintfn("LEXER ERROR at Ln: %d, Col: %d -- %s", self.ln, self.col, msg);
 }
 
+<*
+ Byte classes, looked up in one table: faster than the generic `ascii::` helpers.
+*>
+const char CLASS_WS    = 1;
+const char CLASS_DIGIT = 2;
+const char CLASS_IDENT = 4; // [A-Za-z0-9_]
+const char CLASS_LOWER = 8;
+const char CLASS_UPPER = 16;
+const char CLASS_NUMBER = 32; // after the first byte of a number: hex digits and "+.pPxXoOuUlLi_"
+
+const char[256] CHAR_CLASS = {
+	[' '] = CLASS_WS, ['\t'] = CLASS_WS, ['\r'] = CLASS_WS, ['\n'] = CLASS_WS,
+	['0'..'9'] = CLASS_DIGIT | CLASS_IDENT | CLASS_NUMBER,
+	['_'] = CLASS_IDENT | CLASS_NUMBER, ['+'] = CLASS_NUMBER, ['.'] = CLASS_NUMBER,
+	['a'..'f'] = CLASS_IDENT | CLASS_LOWER | CLASS_NUMBER,
+	['g'..'h'] = CLASS_IDENT | CLASS_LOWER,
+	['i'] = CLASS_IDENT | CLASS_LOWER | CLASS_NUMBER,
+	['j'..'k'] = CLASS_IDENT | CLASS_LOWER,
+	['l'] = CLASS_IDENT | CLASS_LOWER | CLASS_NUMBER,
+	['m'..'n'] = CLASS_IDENT | CLASS_LOWER,
+	['o'..'p'] = CLASS_IDENT | CLASS_LOWER | CLASS_NUMBER,
+	['q'..'t'] = CLASS_IDENT | CLASS_LOWER,
+	['u'] = CLASS_IDENT | CLASS_LOWER | CLASS_NUMBER,
+	['v'..'w'] = CLASS_IDENT | CLASS_LOWER,
+	['x'] = CLASS_IDENT | CLASS_LOWER | CLASS_NUMBER,
+	['y'..'z'] = CLASS_IDENT | CLASS_LOWER,
+	['A'..'F'] = CLASS_IDENT | CLASS_UPPER | CLASS_NUMBER,
+	['G'..'K'] = CLASS_IDENT | CLASS_UPPER,
+	['L'] = CLASS_IDENT | CLASS_UPPER | CLASS_NUMBER,
+	['M'..'N'] = CLASS_IDENT | CLASS_UPPER,
+	['O'..'P'] = CLASS_IDENT | CLASS_UPPER | CLASS_NUMBER,
+	['Q'..'T'] = CLASS_IDENT | CLASS_UPPER,
+	['U'] = CLASS_IDENT | CLASS_UPPER | CLASS_NUMBER,
+	['V'..'W'] = CLASS_IDENT | CLASS_UPPER,
+	['X'] = CLASS_IDENT | CLASS_UPPER | CLASS_NUMBER,
+	['Y'..'Z'] = CLASS_IDENT | CLASS_UPPER,
+};
+
+
+
 fn bool is_lf(char c) @inline => c == '\n';
-fn bool is_ws(char c) @inline => @ok(" \t\r\n".index_of_char(c));
-fn bool is_digit(char c) @inline => ascii::is_digit(c);
-fn bool is_ident(char c) @inline => ascii::is_alnum(c) || c == '_';
+fn bool is_ws(char c) @inline => (CHAR_CLASS[c] & CLASS_WS) != 0;
+fn bool is_digit(char c) @inline => (CHAR_CLASS[c] & CLASS_DIGIT) != 0;
+fn bool is_ident(char c) @inline => (CHAR_CLASS[c] & CLASS_IDENT) != 0;
+
+<*
+ Line and column bookkeeping for one consumed byte (the part of `advance` that
+ doesn't move `pos`), for scanners that walk the input with a local index.
+*>
+fn void Lexer.track_byte(&self, char c) @inline
+{
+	if (c == '\n')
+	{
+		self.ln++;
+		self.nl_before++;
+		self.col = 1;
+	}
+	else
+	{
+		self.col++;
+	}
+}
 
 fn char? Lexer.advance(&self)
 {
@@ -139,6 +197,19 @@ fn char? Lexer.advance(&self)
 	return c;
 }
 
+<*
+ Skip [A-Za-z0-9_]. These never include a newline, so the line is untouched and
+ the column moves once, by the whole run.
+*>
+fn void Lexer.skip_ident_chars(&self) @inline
+{
+	String input = self.input;
+	sz p = self.pos;
+	while (p < input.len && is_ident(input[p])) p++;
+	self.col += p - self.pos;
+	self.pos = p;
+}
+
 fn bool Lexer.at_end(&self) => self.pos >= self.input.len;
 
 fn char Lexer.peek(&self, sz ahead = 0)
@@ -147,15 +218,23 @@ fn char Lexer.peek(&self, sz ahead = 0)
 	return self.input[self.pos + ahead];
 }
 
+<*
+ Consume `s` if the input continues with it. Patterns are 1-4 bytes, so a byte
+ loop beats a call to memcmp. Patterns never contain a newline, so only the
+ column moves.
+*>
 fn bool Lexer.must(&self, String s)
 {
 	sz n = s.len;
-	if (self.pos+n-1 < self.input.len && self.input[self.pos:n] == s)
+	if (self.pos + n > self.input.len) return false;
+	char* in = self.input.ptr + self.pos;
+	for (sz i = 0; i < n; i++)
 	{
-		while (n--) (void)self.advance();
-		return true;
+		if (in[i] != s[i]) return false;
 	}
-	return false;
+	self.pos += n;
+	self.col += n;
+	return true;
 }
 
 fn String Lexer.lexeme(&self)
@@ -167,7 +246,7 @@ fn String Lexer.lexeme(&self)
 <*
  Emit token from lexer.
 *>
-fn Token Lexer.emit_token(&self, TokenType type)
+fn Token Lexer.emit_token(&self, TokenType type) @inline
 {
 	String lexeme = self.lexeme();
 	Token tok = {
@@ -189,9 +268,6 @@ fn Token Lexer.emit_token(&self, TokenType type)
 *>
 fn Token? Lexer.next(&self)
 {
-	char c;
-	TokenType type;
-
 	// Newlines inside the previous token belong to it, not to the gap before this one.
 	self.nl_before = 0;
 	self.scan_whitespace()!;
@@ -203,11 +279,22 @@ fn Token? Lexer.next(&self)
 	self.unterminated = false;
 	if (self.at_end()) return io::EOF~;
 
+	return self.emit_token(self.scan_token()!);
+}
+
+<*
+ Scan one token, starting at a non-whitespace byte, and return its type.
+*>
+fn TokenType? Lexer.scan_token(&self)
+{
+	char c;
+	TokenType type;
+
 	switch (c = self.peek())
 	{
-		case ';': self.advance()!; return self.emit_token(EOS);
-		case ',': self.advance()!; return self.emit_token(COMMA);
-		case '~': self.advance()!; return self.emit_token(BIT_NOT);
+		case ';': self.advance()!; return EOS;
+		case ',': self.advance()!; return COMMA;
+		case '~': self.advance()!; return BIT_NOT;
 		case '^':
 			switch
 			{
@@ -215,7 +302,7 @@ fn Token? Lexer.next(&self)
 				case self.must("^"):  type = BIT_XOR;
 				default: return INVALID_CHAR~;
 			}
-			return self.emit_token(type);
+			return type;
 		case '*':
 			switch
 			{
@@ -223,7 +310,7 @@ fn Token? Lexer.next(&self)
 				case self.must("*"):  type = STAR;
 				default: return INVALID_CHAR~;
 			}
-			return self.emit_token(type);
+			return type;
 		case '%':
 			switch
 			{
@@ -231,7 +318,7 @@ fn Token? Lexer.next(&self)
 				case self.must("%"):  type = MOD;
 				default: return INVALID_CHAR~;
 			}
-			return self.emit_token(type);
+			return type;
 		case '.':
 			switch
 			{
@@ -240,7 +327,7 @@ fn Token? Lexer.next(&self)
 				case self.must("."):   type = DOT;
 				default: return INVALID_CHAR~;
 			}
-			return self.emit_token(type);
+			return type;
 		case '+':
 			switch
 			{
@@ -251,7 +338,7 @@ fn Token? Lexer.next(&self)
 				case self.must("+"):    type = PLUS;
 				default: return INVALID_CHAR~;
 			}
-			return self.emit_token(type);
+			return type;
 		case '-':
 			switch
 			{
@@ -261,7 +348,7 @@ fn Token? Lexer.next(&self)
 				case self.must("-"):  type = MINUS;
 				default: return INVALID_CHAR~;
 			}
-			return self.emit_token(type);
+			return type;
 		case ':':
 			switch
 			{
@@ -269,7 +356,7 @@ fn Token? Lexer.next(&self)
 				case self.must(":"):   type = COLON;
 				default: return INVALID_CHAR~;
 			}
-			return self.emit_token(type);
+			return type;
 		case '!':
 			switch
 			{
@@ -278,7 +365,7 @@ fn Token? Lexer.next(&self)
 				case self.must("!"):   type = BANG;
 				default: return INVALID_CHAR~;
 			}
-			return self.emit_token(type);
+			return type;
 		case '?':
 			switch
 			{
@@ -288,7 +375,7 @@ fn Token? Lexer.next(&self)
 				case self.must("?"):   type = QUESTION;
 				default: return INVALID_CHAR~;
 			}
-			return self.emit_token(type);
+			return type;
 		case '|':
 			switch
 			{
@@ -298,7 +385,7 @@ fn Token? Lexer.next(&self)
 				case self.must("|"):   type = BIT_OR;
 				default: return INVALID_CHAR~;
 			}
-			return self.emit_token(type);
+			return type;
 		case '&':
 			switch
 			{
@@ -308,7 +395,7 @@ fn Token? Lexer.next(&self)
 				case self.must("&"):   type = AMP;
 				default: return INVALID_CHAR~;
 			}
-			return self.emit_token(type);
+			return type;
 		case '=':
 			switch
 			{
@@ -317,7 +404,7 @@ fn Token? Lexer.next(&self)
 				case self.must("="):   type = EQ;
 				default: return INVALID_CHAR~;
 			}
-			return self.emit_token(type);
+			return type;
 		case '>':
 			switch
 			{
@@ -328,7 +415,7 @@ fn Token? Lexer.next(&self)
 				case self.must(">"):   type = GREATER;
 				default: return INVALID_CHAR~;
 			}
-			return self.emit_token(type);
+			return type;
 
 		case '[':
 			switch
@@ -337,13 +424,13 @@ fn Token? Lexer.next(&self)
 				case self.must("["):   type = LBRACKET;
 				default: return INVALID_CHAR~;
 			}
-			return self.emit_token(type);
+			return type;
 
-		case ']': self.advance()!; return self.emit_token(RBRACKET);
-		case '{': self.advance()!; return self.emit_token(LBRACE);
-		case '}': self.advance()!; return self.emit_token(RBRACE);
-		case '(': self.advance()!; return self.emit_token(LPAREN);
-		case ')': self.advance()!; return self.emit_token(RPAREN);
+		case ']': self.advance()!; return RBRACKET;
+		case '{': self.advance()!; return LBRACE;
+		case '}': self.advance()!; return RBRACE;
+		case '(': self.advance()!; return LPAREN;
+		case ')': self.advance()!; return RPAREN;
 
 		case '/':
 			switch
@@ -354,7 +441,7 @@ fn Token? Lexer.next(&self)
 				case self.must("/") : type = DIV;
 				default: return INVALID_CHAR~;
 			}
-			return self.emit_token(type);
+			return type;
 
 		case '<':
 			switch
@@ -366,13 +453,13 @@ fn Token? Lexer.next(&self)
 				case self.must("<") :  type = LESS;
 				default: return INVALID_CHAR~;
 			}
-			return self.emit_token(type);
+			return type;
 
 		case '$':
 			switch
 			{
-				case self.must("$$"): return self.emit_token(BUILTIN);
-				case self.must("$"):  return self.lex_compile_time()!;
+				case self.must("$$"): return BUILTIN;
+				case self.must("$"):  return self.lex_compile_time();
 				default: return INVALID_CHAR~;
 			}
 
@@ -382,7 +469,7 @@ fn Token? Lexer.next(&self)
 			if (self.pos == 0 && self.must("#!"))
 			{
 				self.scan_line_comment()!;
-				return self.emit_token(LINE_COMMENT);
+				return LINE_COMMENT;
 			}
 			self.advance()!;
 			// On its own (`@` in `@[...]`, `#` in `#[...]`) it is punctuation.
@@ -400,8 +487,8 @@ fn Token? Lexer.next(&self)
 				while (self.peek(i) == '_') i++;
 				starts_ident = ascii::is_lower(self.peek(i));
 			}
-			if (!starts_ident) return self.emit_token(c == '@' ? AT : HASH);
-			return self.lex_at_or_hash_ident()!;
+			if (!starts_ident) return c == '@' ? AT : HASH;
+			return self.lex_at_or_hash_ident();
 
 		case 'b':
 		case 'x':
@@ -413,30 +500,30 @@ fn Token? Lexer.next(&self)
 				case self.must("x\""):   self.scan_until('"');
 				case self.must("x'"):    self.scan_until('\'');
 				case self.must("x`"):    self.scan_until('`');
-				default: return self.lex_ident()!;
+				default: return self.lex_ident();
 			}
-			return self.emit_token(BYTES);
+			return BYTES;
 
 		case '\'':
 			self.scan_string();
-			return self.emit_token(CHAR_LITERAL);
+			return CHAR_LITERAL;
 		case '"':
 		case '`':
 			self.scan_string();
-			return self.emit_token(STRING);
+			return STRING;
 
 		case '\n':
 			self.advance()!;
-			return self.emit_token(EOL);
+			return EOL;
 
 		default:
-			if (is_digit(c)) return self.lex_number()!;
-			if (is_ident(c)) return self.lex_ident()!;
+			if (is_digit(c)) return self.lex_number();
+			if (is_ident(c)) return self.lex_ident();
 			// Not the start of any token. Take the whole UTF-8 character, so a
 			// multi-byte one (a pasted smart quote) is one INVALID token, not several.
 			self.advance()!;
 			while (!self.at_end() && (self.peek() & 0xC0) == 0x80) self.advance()!;
-			return self.emit_token(INVALID);
+			return INVALID;
 	}
 }
 
@@ -505,38 +592,62 @@ fn void? Lexer.scan_line_comment(&self)
 
 fn void? Lexer.scan_block_comment(&self)
 {
+	String input = self.input;
+	sz p = self.pos;
 	sz depth = 1;
-	while (!self.at_end() && depth != 0)
+	while (p < input.len && depth != 0)
 	{
-		switch
+		char c = input[p];
+		if (c == '/' && p + 1 < input.len && input[p + 1] == '*')
 		{
-			case self.must("/*"): depth++;
-			case self.must("*/"): depth--;
-			default: self.advance()!;
+			depth++;
+			p += 2;
+			self.col += 2;
+		}
+		else if (c == '*' && p + 1 < input.len && input[p + 1] == '/')
+		{
+			depth--;
+			p += 2;
+			self.col += 2;
+		}
+		else
+		{
+			p++;
+			self.track_byte(c);
 		}
 	}
+	self.pos = p;
 	if (depth != 0) self.unterminated = true;
 }
 
 fn void? Lexer.scan_contract(&self)
 {
-	while (!self.at_end())
+	String input = self.input;
+	sz p = self.pos;
+	while (p < input.len)
 	{
-		if (self.must("*>")) return;
-		self.advance()!;
+		char c = input[p];
+		if (c == '*' && p + 1 < input.len && input[p + 1] == '>')
+		{
+			self.pos = p + 2;
+			self.col += 2;
+			return;
+		}
+		p++;
+		self.track_byte(c);
 	}
+	self.pos = p;
 	self.unterminated = true;
 }
 
-fn Token? Lexer.lex_number(&self)
+fn TokenType Lexer.lex_number(&self)
 {
 	char c, prev;
 	int i = 0;
 	bool dot, expo;
 	bool hex = self.peek() == '0' && (self.peek(1) == 'x' || self.peek(1) == 'X');
 	while (!self.at_end() && (c = self.peek())
-		&& (is_digit(c) || c == '-' || (i > 0 && (ascii::is_xdigit(c) || ascii::is_bdigit(c) || ascii::is_odigit(c)
-			|| "+.eEpPbBxXoOuUlLifdDF_".contains_char(c))))
+		&& (is_digit(c) || c == '-' || (i > 0 && (CHAR_CLASS[c] & CLASS_NUMBER)))
 	)
 	{
 		// A sign belongs to the number only after its exponent marker: `e` in a
@@ -548,161 +659,151 @@ fn Token? Lexer.lex_number(&self)
 		if (c == '.' && (dot || expo)) break;
 		if (c == '.') dot = true;
 		if ((hex ? "pP" : "eE").contains_char(c)) expo = true;
-		self.advance()!;
+		(void)self.advance();
 		prev = c;
 		i++;
 	}
 
-	return self.emit_token(number::classify(self.lexeme()));
+	return number::classify(self.lexeme());
 }
 
-fn Token? Lexer.lex_ident(&self)
+fn TokenType Lexer.lex_ident(&self)
 {
-	char c;
-	while (!self.at_end() && (c = self.peek()) && is_ident(c))
-	{
-		self.advance()!;
-	}
+	self.skip_ident_chars();
 
 	String str = self.lexeme();
+	// Keywords are all lowercase: anything else is a plain identifier of some kind.
+	if (!(CHAR_CLASS[str[0]] & CLASS_LOWER)) return ident::classify(str);
 	switch (str)
 	{
 		// Top-Level Explicit Keywords
-		case "alias":     return self.emit_token(ALIAS);
-		case "attrdef":   return self.emit_token(ATTRDEF);
-		case "attrmacro": return self.emit_token(ATTRMACRO);
-		case "bitstruct": return self.emit_token(BITSTRUCT);
-		case "const":     return self.emit_token(CONST);
-		case "constdef":  return self.emit_token(CONSTDEF);
-		case "constset":  return self.emit_token(CONSTSET);
-		case "enum":      return self.emit_token(ENUM);
-		case "faultdef":  return self.emit_token(FAULTDEF);
-		case "fn":        return self.emit_token(FUNC);
-		case "import":    return self.emit_token(IMPORT);
-		case "interface": return self.emit_token(INTERFACE);
-		case "macro":     return self.emit_token(MACRO);
-		case "module":    return self.emit_token(MODULE);
-		case "typedef":   return self.emit_token(TYPEDEF);
-		case "struct":    return self.emit_token(STRUCT);
-		case "union":     return self.emit_token(UNION);
+		case "alias":     return ALIAS;
+		case "attrdef":   return ATTRDEF;
+		case "attrmacro": return ATTRMACRO;
+		case "bitstruct": return BITSTRUCT;
+		case "const":     return CONST;
+		case "constdef":  return CONSTDEF;
+		case "constset":  return CONSTSET;
+		case "enum":      return ENUM;
+		case "faultdef":  return FAULTDEF;
+		case "fn":        return FUNC;
+		case "import":    return IMPORT;
+		case "interface": return INTERFACE;
+		case "macro":     return MACRO;
+		case "module":    return MODULE;
+		case "typedef":   return TYPEDEF;
+		case "struct":    return STRUCT;
+		case "union":     return UNION;
 
 		// Explicit Keywords
-		case "any":       return self.emit_token(ANY);
-		case "asm":       return self.emit_token(ASM);
-		case "assert":    return self.emit_token(ASSERT);
-		case "break":     return self.emit_token(BREAK);
-		case "case":      return self.emit_token(CASE);
-		case "catch":     return self.emit_token(CATCH);
-		case "continue":  return self.emit_token(CONTINUE);
-		case "default":   return self.emit_token(DEFAULT);
-		case "defer":     return self.emit_token(DEFER);
-		case "do":        return self.emit_token(DO);
-		case "else":      return self.emit_token(ELSE);
-		case "false":     return self.emit_token(FALSE);
-		case "for":       return self.emit_token(FOR);
-		case "foreach":   return self.emit_token(FOREACH);
-		case "foreach_r": return self.emit_token(FOREACH_R);
-		case "if":        return self.emit_token(IF);
-		case "lengthof":  return self.emit_token(LENGTHOF);
-		case "nextcase":  return self.emit_token(NEXTCASE);
-		case "null":      return self.emit_token(NULL);
-		case "return":    return self.emit_token(RETURN);
-		case "static":    return self.emit_token(STATIC);
-		case "switch":    return self.emit_token(SWITCH);
-		case "true":      return self.emit_token(TRUE);
-		case "try":       return self.emit_token(TRY);
-		case "var":       return self.emit_token(VAR);
-		case "while":     return self.emit_token(WHILE);
+		case "any":       return ANY;
+		case "asm":       return ASM;
+		case "assert":    return ASSERT;
+		case "break":     return BREAK;
+		case "case":      return CASE;
+		case "catch":     return CATCH;
+		case "continue":  return CONTINUE;
+		case "default":   return DEFAULT;
+		case "defer":     return DEFER;
+		case "do":        return DO;
+		case "else":      return ELSE;
+		case "false":     return FALSE;
+		case "for":       return FOR;
+		case "foreach":   return FOREACH;
+		case "foreach_r": return FOREACH_R;
+		case "if":        return IF;
+		case "lengthof":  return LENGTHOF;
+		case "nextcase":  return NEXTCASE;
+		case "null":      return NULL;
+		case "return":    return RETURN;
+		case "static":    return STATIC;
+		case "switch":    return SWITCH;
+		case "true":      return TRUE;
+		case "try":       return TRY;
+		case "var":       return VAR;
+		case "while":     return WHILE;
 
-		case "extern":    return self.emit_token(EXTERN);
-		case "inline":    return self.emit_token(INLINE);
-		case "tlocal":    return self.emit_token(TLOCAL);
+		case "extern":    return EXTERN;
+		case "inline":    return INLINE;
+		case "tlocal":    return TLOCAL;
 
 		// Base Types
-		case "void":      return self.emit_token(VOID);
-		case "bool":      return self.emit_token(BOOL);
-		case "char":      return self.emit_token(CHAR);
-		case "ichar":     return self.emit_token(ICHAR);
-		case "short":     return self.emit_token(SHORT);
-		case "ushort":    return self.emit_token(USHORT);
-		case "int":       return self.emit_token(INT);
-		case "uint":      return self.emit_token(UINT);
-		case "long":      return self.emit_token(LONG);
-		case "ulong":     return self.emit_token(ULONG);
-		case "int128":    return self.emit_token(INT128);
-		case "uint128":   return self.emit_token(UINT128);
-		case "iptr":      return self.emit_token(IPTR);
-		case "uptr":      return self.emit_token(UPTR);
-		case "sz":        return self.emit_token(ISZ);
-		case "usz":       return self.emit_token(USZ);
-		case "float":     return self.emit_token(FLOAT);
-		case "double":    return self.emit_token(DOUBLE);
-		case "float16":   return self.emit_token(FLOAT16);
-		case "bfloat":    return self.emit_token(BFLOAT);
-		case "float128":  return self.emit_token(FLOAT128);
-		case "fault":     return self.emit_token(FAULT);
-		case "typeid":    return self.emit_token(TYPEID);
-		case "untypedlist": return self.emit_token(UNTYPEDLIST);
+		case "void":      return VOID;
+		case "bool":      return BOOL;
+		case "char":      return CHAR;
+		case "ichar":     return ICHAR;
+		case "short":     return SHORT;
+		case "ushort":    return USHORT;
+		case "int":       return INT;
+		case "uint":      return UINT;
+		case "long":      return LONG;
+		case "ulong":     return ULONG;
+		case "int128":    return INT128;
+		case "uint128":   return UINT128;
+		case "iptr":      return IPTR;
+		case "uptr":      return UPTR;
+		case "sz":        return ISZ;
+		case "usz":       return USZ;
+		case "float":     return FLOAT;
+		case "double":    return DOUBLE;
+		case "float16":   return FLOAT16;
+		case "bfloat":    return BFLOAT;
+		case "float128":  return FLOAT128;
+		case "fault":     return FAULT;
+		case "typeid":    return TYPEID;
+		case "untypedlist": return UNTYPEDLIST;
 
 		default:
-			return self.emit_token(ident::classify(str));
+			return IDENT; // lowercase first, not a keyword
 	}
 }
 
-fn Token? Lexer.lex_compile_time(&self)
+fn TokenType Lexer.lex_compile_time(&self)
 {
-	char c;
-	while (!self.at_end() && (c = self.peek()) && is_ident(c))
-	{
-		self.advance()!;
-	}
+	self.skip_ident_chars();
 
 	String str = self.lexeme();
 	switch (str)
 	{
 		// Compile time keywords (C3 0.8)
-		case "$assert":     return self.emit_token(CT_ASSERT);
-		case "$case":       return self.emit_token(CT_CASE);
-		case "$default":    return self.emit_token(CT_DEFAULT);
-		case "$defined":    return self.emit_token(CT_DEFINED);
-		case "$echo":       return self.emit_token(CT_ECHO);
-		case "$else":       return self.emit_token(CT_ELSE);
-		case "$embed":      return self.emit_token(CT_EMBED);
-		case "$endfor":     return self.emit_token(CT_ENDFOR);
-		case "$endforeach": return self.emit_token(CT_ENDFOREACH);
-		case "$endif":      return self.emit_token(CT_ENDIF);
-		case "$endswitch":  return self.emit_token(CT_ENDSWITCH);
-		case "$error":      return self.emit_token(CT_ERROR);
-		case "$eval":       return self.emit_token(CT_EVAL);
-		case "$exec":       return self.emit_token(CT_EXEC);
-		case "$expand":     return self.emit_token(CT_EXPAND);
-		case "$feat":       return self.emit_token(CT_FEAT);
-		case "$feature":    return self.emit_token(CT_FEATURE);
-		case "$for":        return self.emit_token(CT_FOR);
-		case "$foreach":    return self.emit_token(CT_FOREACH);
-		case "$if":         return self.emit_token(CT_IF);
-		case "$include":    return self.emit_token(CT_INCLUDE);
-		case "$reflect":    return self.emit_token(CT_REFLECT);
-		case "$stringify":  return self.emit_token(CT_STRINGIFY);
-		case "$switch":     return self.emit_token(CT_SWITCH);
-		case "$Typefrom":   return self.emit_token(CT_TYPEFROM);
-		case "$Typeof":     return self.emit_token(CT_TYPEOF);
-		case "$vaarg":      return self.emit_token(CT_VAARG);
+		case "$assert":     return CT_ASSERT;
+		case "$case":       return CT_CASE;
+		case "$default":    return CT_DEFAULT;
+		case "$defined":    return CT_DEFINED;
+		case "$echo":       return CT_ECHO;
+		case "$else":       return CT_ELSE;
+		case "$embed":      return CT_EMBED;
+		case "$endfor":     return CT_ENDFOR;
+		case "$endforeach": return CT_ENDFOREACH;
+		case "$endif":      return CT_ENDIF;
+		case "$endswitch":  return CT_ENDSWITCH;
+		case "$error":      return CT_ERROR;
+		case "$eval":       return CT_EVAL;
+		case "$exec":       return CT_EXEC;
+		case "$expand":     return CT_EXPAND;
+		case "$feat":       return CT_FEAT;
+		case "$feature":    return CT_FEATURE;
+		case "$for":        return CT_FOR;
+		case "$foreach":    return CT_FOREACH;
+		case "$if":         return CT_IF;
+		case "$include":    return CT_INCLUDE;
+		case "$reflect":    return CT_REFLECT;
+		case "$stringify":  return CT_STRINGIFY;
+		case "$switch":     return CT_SWITCH;
+		case "$Typefrom":   return CT_TYPEFROM;
+		case "$Typeof":     return CT_TYPEOF;
+		case "$vaarg":      return CT_VAARG;
 
 		default:
-			return self.emit_token(ident::classify(str));
+			return ident::classify(str);
 	}
 }
 
-fn Token? Lexer.lex_at_or_hash_ident(&self)
+fn TokenType Lexer.lex_at_or_hash_ident(&self)
 {
-	char c;
-	while (!self.at_end() && (c = self.peek()) && is_ident(c))
-	{
-		self.advance()!;
-	}
+	self.skip_ident_chars();
 
-	return self.emit_token(ident::classify(self.lexeme()));
+	return ident::classify(self.lexeme());
 }
 
 struct ContractLexer
@@ -925,42 +1026,7 @@ fn TokenType classify(String s)
 
 module c3::lexer::ident;
 
-enum IdentState : char (bool accept) @private {
-	ERROR_STATE { false },
-	INIT_STATE  { false },
-	IDENT_STATE { true },
-	TYPE_STATE  { true },
-	CONST_STATE { true },
-}
-
-const IdentState[char::max+1][*] TRANSITIONS @private = {
-	[IdentState.INIT_STATE] = {
-		['A'..'Z'] = CONST_STATE,
-		['a'..'z'] = IDENT_STATE,
-		['_']      = INIT_STATE,
-		['$']      = INIT_STATE,
-		['#']      = INIT_STATE,
-		['@']      = INIT_STATE,
-	},
-	[IdentState.IDENT_STATE] = {
-		['A'..'Z'] = IDENT_STATE,
-		['a'..'z'] = IDENT_STATE,
-		['0'..'9'] = IDENT_STATE,
-		['_']      = IDENT_STATE,
-	},
-	[IdentState.TYPE_STATE] = {
-		['A'..'Z'] = TYPE_STATE,
-		['a'..'z'] = TYPE_STATE,
-		['0'..'9'] = TYPE_STATE,
-		['_']      = TYPE_STATE,
-	},
-	[IdentState.CONST_STATE] = {
-		['A'..'Z'] = CONST_STATE,
-		['a'..'z'] = TYPE_STATE,
-		['0'..'9'] = CONST_STATE,
-		['_']      = CONST_STATE,
-	},
-};
+import c3::lexer;
 
 // classify() derives TYPE_IDENT / CONST_IDENT by adding an offset to the base token.
 $assert TokenType.IDENT.ordinal + 1      == TokenType.TYPE_IDENT.ordinal : "classify() relies on this TokenType order";
@@ -970,23 +1036,45 @@ $assert TokenType.CT_IDENT.ordinal + 2   == TokenType.CT_CONST_IDENT.ordinal : "
 $assert TokenType.AT_IDENT.ordinal + 1   == TokenType.AT_TYPE_IDENT.ordinal : "classify() relies on this TokenType order";
 $assert TokenType.AT_IDENT.ordinal + 2   == TokenType.AT_CONST_IDENT.ordinal : "classify() relies on this TokenType order";
 
+<*
+ Classify an identifier with an optional `$`, `@` or `#` prefix:
+ after the prefix and any leading '_', a lowercase letter makes an IDENT, an
+ uppercase one a CONST_IDENT, or a TYPE_IDENT once a lowercase letter follows.
+ A digit first, or only '_', is INVALID.
+*>
 fn TokenType classify(String s)
 {
 	// A lone '_' is its own token in the compiler.
 	if (s == "_") return UNDERSCORE;
 
-	IdentState state = IdentState.INIT_STATE;
-	foreach (c: s) state = TRANSITIONS[state][c];
-	if (state.accept)
+	sz i = 0;
+	TokenType base = IDENT;
+	if (s.len)
 	{
-		char offset = state.ordinal - IdentState.IDENT_STATE.ordinal;
 		switch (s[0])
 		{
-		case '$': return TokenType::from_ordinal(offset + TokenType.CT_IDENT.ordinal);
-		case '#': return state == IDENT_STATE ? HASH_IDENT : INVALID; // the compiler has no #Type / #CONST tokens
-		case '@': return TokenType::from_ordinal(offset + TokenType.AT_IDENT.ordinal);
-		default:  return TokenType::from_ordinal(offset + TokenType.IDENT.ordinal);
+			case '$': base = CT_IDENT; i = 1;
+			case '#': base = HASH_IDENT; i = 1;
+			case '@': base = AT_IDENT; i = 1;
 		}
 	}
-	return INVALID;
+	while (i < s.len && s[i] == '_') i++;
+	if (i == s.len) return INVALID;
+
+	char first = lexer::CHAR_CLASS[s[i]];
+	if (!(first & (lexer::CLASS_LOWER | lexer::CLASS_UPPER))) return INVALID;
+
+	bool lower = (first & lexer::CLASS_LOWER) != 0;
+	bool has_lower;
+	for (i++; i < s.len; i++)
+	{
+		char k = lexer::CHAR_CLASS[s[i]];
+		if (!(k & lexer::CLASS_IDENT)) return INVALID;
+		has_lower |= (k & lexer::CLASS_LOWER) != 0;
+	}
+
+	// The compiler has no #Type / #CONST tokens.
+	if (base == HASH_IDENT) return lower ? HASH_IDENT : INVALID;
+	if (lower) return base;
+	return TokenType::from_ordinal(base.ordinal + (has_lower ? 1 : 2));
 }
