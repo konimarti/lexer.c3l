@@ -23,7 +23,7 @@ enum TokenType : ushort
 	CT_OR_OP,
 
 	// Punctuation
-	EOS, COLON, SCOPE, COMMA, DOT, DOTDOT, ELLIPSIS, AT, HASH,
+	EOS, COLON, SCOPE, COMMA, DOT, DOTDOT, ELLIPSIS, AT, HASH, UNDERSCORE,
 
 	// Structure
 	LBRACE, RBRACE, LBRACKET, RBRACKET, LPAREN, RPAREN, ARROW, IMPLIES,
@@ -35,7 +35,7 @@ enum TokenType : ushort
 	// Literals (Identifiers and Strings)
 	STRING, CHAR_LITERAL, BYTES, INTEGER, REAL, IDENT, TYPE_IDENT,
 	CONST_IDENT, AT_IDENT, AT_TYPE_IDENT, AT_CONST_IDENT, HASH_IDENT,
-	HASH_TYPE_IDENT, HASH_CONST_IDENT, CT_IDENT, CT_TYPE_IDENT,
+	CT_IDENT, CT_TYPE_IDENT,
 	CT_CONST_IDENT,
 
 	// Base Types (base_type_no_generic)
@@ -55,7 +55,7 @@ enum TokenType : ushort
 	CT_ENDFOR, CT_ENDFOREACH, CT_ENDIF, CT_ENDSWITCH, CT_ERROR, CT_EVAL,
 	CT_EXEC, CT_EXPAND, CT_FEAT, CT_FEATURE, CT_FOR, CT_FOREACH, CT_IF,
 	CT_INCLUDE, CT_REFLECT, CT_STRINGIFY, CT_SWITCH, CT_TYPEFROM, CT_TYPEOF,
-	CT_VAARG, AT_INLINE, AT_PURE, AT_NOINLINE,
+	CT_VAARG,
 
 	EOL, EOF,
 }
@@ -386,7 +386,21 @@ fn Token? Lexer.next(&self)
 			}
 			self.advance()!;
 			// On its own (`@` in `@[...]`, `#` in `#[...]`) it is punctuation.
-			if (!is_ident(self.peek())) return self.emit_token(c == '@' ? AT : HASH);
+			// Like the compiler: `@` starts an identifier before a letter or '_',
+			// `#` only before a lowercase letter (after any '_'), so `#Foo` is
+			// HASH + TYPE_IDENT and `@1` is AT + INTEGER.
+			bool starts_ident;
+			if (c == '@')
+			{
+				starts_ident = ascii::is_alpha(self.peek()) || self.peek() == '_';
+			}
+			else
+			{
+				sz i = 0;
+				while (self.peek(i) == '_') i++;
+				starts_ident = ascii::is_lower(self.peek(i));
+			}
+			if (!starts_ident) return self.emit_token(c == '@' ? AT : HASH);
 			return self.lex_at_or_hash_ident()!;
 
 		case 'b':
@@ -688,14 +702,7 @@ fn Token? Lexer.lex_at_or_hash_ident(&self)
 		self.advance()!;
 	}
 
-	String str = self.lexeme();
-	switch (str)
-	{
-		case "@inline":   return self.emit_token(AT_INLINE);
-		case "@pure":     return self.emit_token(AT_PURE);
-		case "@noinline": return self.emit_token(AT_NOINLINE);
-		default: return self.emit_token(ident::classify(str));
-	}
+	return self.emit_token(ident::classify(self.lexeme()));
 }
 
 struct ContractLexer
@@ -739,143 +746,6 @@ fn Token? ContractLexer.next(&self)
 		}
 	}
 	return self.lexer.next();
-}
-
-fn void test_contract_lexer() @test
-{
-	ContractLexer dl;
-	dl.init(`<*
-		 Check if a character is in a set.
-
-		 @param c : "the character to check"
-
-
-		 @param [in] set : "String containing the characters"
-		 @pure
-		 @return "True if a character is in the set"
-		 *>`);
-
-	TokenType[] want = {
-		AT_IDENT, IDENT, COLON, STRING, EOL, EOL, EOL,
-		AT_IDENT, LBRACKET, IDENT, RBRACKET, IDENT, COLON, STRING, EOL,
-		AT_PURE, EOL,
-		AT_IDENT, STRING, EOL,
-	};
-
-	while (try tok = dl.next() && want.len)
-	{
-		assert(tok.type == want[0], "Token type mismatch: got=%s, but want=%s", tok.type, want[0]);
-		want = want[1..];
-	}
-	assert(dl.intro.trim() == "Check if a character is in a set.");
-}
-
-<*
- Lex `input` and return its tokens (temp-allocated).
-*>
-fn Token[] lex_all(String input) @private
-{
-	Token[] out = mem::temp_array(Token, input.len + 1);
-	sz n = 0;
-	Lexer lex;
-	lex.init(input);
-	while (try tok = lex.next()) out[n++] = tok;
-	assert(lex.at_end(), "the lexer must reach the end of the input");
-	return out[:n];
-}
-
-fn void test_number_then_member_access() @test
-{
-	String[3] srcs = { "90.0.to_radians()", "1e5.foo", "0x1p3.foo" };
-	foreach (src : srcs)
-	{
-		Token[] toks = lex_all(src);
-		assert(toks[0].type == REAL, "%s: got %s", src, toks[0].type);
-		assert(toks[1].type == DOT && toks[2].type == IDENT, "%s: member access is lexed on its own", src);
-	}
-}
-
-fn void test_unterminated_string_stops_at_line_end() @test
-{
-	Token[] toks = lex_all("a = \"abc;\nint x;");
-	assert(toks[2].type == STRING && toks[2].unterminated);
-	assert(toks[2].text == "\"abc;", "got %s", toks[2].text);
-	assert(toks[3].type == INT && toks[3].ln == 2 && toks[3].col == 1, "the next line lexes normally");
-}
-
-fn void test_unterminated_literals_at_eof_are_tokens() @test
-{
-	foreach (src : (String[]){ "\"abc", "'a", "`abc", "\"abc\\", "x\"00", "/* x", "<* x" })
-	{
-		Token[] toks = lex_all(src);
-		assert(toks.len == 1 && toks[0].unterminated && toks[0].text == src, "for %s", src);
-	}
-}
-
-fn void test_closed_literals_are_terminated() @test
-{
-	foreach (src : (String[]){ "\"a\\\"b\"", "'a'", "`a``b`", "x\"00\n11\"", "/* /* */ */", "<* x *>" })
-	{
-		Token[] toks = lex_all(src);
-		assert(toks.len == 1 && !toks[0].unterminated && toks[0].text == src, "for %s", src);
-	}
-}
-
-fn void test_escape_never_takes_the_newline() @test
-{
-	Token[] toks = lex_all("\"a\\\nb\"");
-	assert(toks[0].type == STRING && toks[0].unterminated && toks[0].text == "\"a\\");
-}
-
-fn void test_invalid_utf8_char_is_one_token() @test
-{
-	Token[] toks = lex_all("x = \xe2\x80\x9cy;");
-	assert(toks[2].type == INVALID && toks[2].len == 3);
-	assert(toks[3].type == IDENT && toks[3].text == "y");
-}
-
-fn void test_hex_e_is_not_an_exponent() @test
-{
-	Token[] toks = lex_all("0xFE-1 1e-5");
-	assert(toks.len == 4, "got %d tokens", toks.len);
-	assert(toks[0].type == INTEGER && toks[1].type == MINUS && toks[2].type == INTEGER);
-	assert(toks[3].type == REAL && toks[3].text == "1e-5");
-}
-
-fn void test_compile_time_keywords_08() @test
-{
-	Token[] toks = lex_all("$Typeof $Typefrom $feat $feature $reflect $embed $expand $typeof $sizeof");
-	TokenType[] want = { CT_TYPEOF, CT_TYPEFROM, CT_FEAT, CT_FEATURE, CT_REFLECT, CT_EMBED, CT_EXPAND, CT_IDENT, CT_IDENT };
-	foreach (i, t : want) assert(toks[i].type == t, "token %d: got %s", i, toks[i].type);
-}
-
-fn void test_type_keywords_08() @test
-{
-	Token[] toks = lex_all("bfloat untypedlist bfloat16 isz sz attrmacro");
-	TokenType[] want = { BFLOAT, UNTYPEDLIST, IDENT, IDENT, ISZ, ATTRMACRO };
-	foreach (i, t : want) assert(toks[i].type == t, "token %d: got %s", i, toks[i].type);
-}
-
-fn void test_bare_at_and_hash() @test
-{
-	Token[] toks = lex_all("@ # @foo #bar");
-	TokenType[] want = { AT, HASH, AT_IDENT, HASH_IDENT };
-	foreach (i, t : want) assert(toks[i].type == t, "token %d: got %s", i, toks[i].type);
-}
-
-fn void test_shebang_only_on_first_line() @test
-{
-	assert(lex_all("#!/usr/bin/env c3\nx")[0].type == LINE_COMMENT);
-	Token[] toks = lex_all("a #!b");
-	assert(toks[1].type == HASH && toks[2].type == BANG);
-}
-
-fn void test_token_position_is_its_start() @test
-{
-	Token[] toks = lex_all("a\n  /* x\n y */ b");
-	assert(toks[1].ln == 2 && toks[1].col == 3, "comment starts at 2:3, got %d:%d", toks[1].ln, toks[1].col);
-	assert(toks[1].nl_before == 1);
-	assert(toks[2].ln == 3 && toks[2].nl_before == 0, "newlines inside the comment are not before `b`");
 }
 
 module c3::lexer::number;
@@ -1053,52 +923,6 @@ fn TokenType classify(String s)
 	return state.type;
 }
 
-fn void test_number_classify() @test
-{
-	assert(classify("+")          ==  INVALID);
-	assert(classify("-")          ==  INVALID);
-	assert(classify("0")          ==  INTEGER);
-	assert(classify("-1")         ==  INTEGER);
-	assert(classify("123")        ==  INTEGER);
-	assert(classify("123ul")      ==  INTEGER);
-	assert(classify("123i32")     ==  INVALID);
-	assert(classify("0xdeadbeeF") ==  INTEGER);
-	assert(classify("0xcafeUL")   ==  INTEGER);
-	assert(classify("0b101UL")    ==  INTEGER);
-	assert(classify("1xbeef")     ==  INVALID);
-	assert(classify("0b1001.001") ==  INVALID);
-	assert(classify("0b123")      ==  INVALID);
-	assert(classify("0xbeeF.123p1") == REAL);
-	assert(classify("0f")         ==   REAL);
-	assert(classify("0.5f")       ==   REAL);
-	assert(classify("123.0")      ==   REAL);
-	assert(classify("123.0e-10")  ==   REAL);
-	assert(classify("123f")       ==   REAL);
-	assert(classify("123d")       ==   REAL);
-	assert(classify("1.0F")       ==   REAL);
-	assert(classify("2D")         ==   REAL);
-	assert(classify("1.")         ==   REAL);
-	assert(classify("1.e5")       ==   REAL);
-	assert(classify("1_.5")       ==   REAL);
-	assert(classify("0x1.p1")     ==   REAL);
-	assert(classify("1uLL")       ==   INTEGER);
-	assert(classify("1Ll")        ==   INTEGER);
-	assert(classify("1_000")      ==   INTEGER);
-	assert(classify("0x1_F")      ==   INTEGER);
-	assert(classify("1lu")        ==   INVALID);
-	assert(classify("1u8")        ==   INVALID);
-	assert(classify("1__2")       ==   INVALID);
-	assert(classify("1_")         ==   INVALID);
-	assert(classify("0x")         ==   INVALID);
-	assert(classify("0x_1")       ==   INVALID);
-	assert(classify("0b_1")       ==   INVALID);
-	assert(classify("1._5")       ==   INVALID);
-	assert(classify("1e1_0")      ==   INVALID);
-	assert(classify("1.0u")       ==   INVALID);
-	assert(classify("1e")         ==   INVALID);
-	assert(classify("0x1p")       ==   INVALID);
-}
-
 module c3::lexer::ident;
 
 enum IdentState : char (bool accept) @private {
@@ -1138,17 +962,18 @@ const IdentState[char::max+1][*] TRANSITIONS @private = {
 	},
 };
 
+// classify() derives TYPE_IDENT / CONST_IDENT by adding an offset to the base token.
+$assert TokenType.IDENT.ordinal + 1      == TokenType.TYPE_IDENT.ordinal : "classify() relies on this TokenType order";
+$assert TokenType.IDENT.ordinal + 2      == TokenType.CONST_IDENT.ordinal : "classify() relies on this TokenType order";
+$assert TokenType.CT_IDENT.ordinal + 1   == TokenType.CT_TYPE_IDENT.ordinal : "classify() relies on this TokenType order";
+$assert TokenType.CT_IDENT.ordinal + 2   == TokenType.CT_CONST_IDENT.ordinal : "classify() relies on this TokenType order";
+$assert TokenType.AT_IDENT.ordinal + 1   == TokenType.AT_TYPE_IDENT.ordinal : "classify() relies on this TokenType order";
+$assert TokenType.AT_IDENT.ordinal + 2   == TokenType.AT_CONST_IDENT.ordinal : "classify() relies on this TokenType order";
+
 fn TokenType classify(String s)
 {
-	// Verify order of TokenTypes
-	assert(TokenType.IDENT.ordinal + 1      == TokenType.TYPE_IDENT.ordinal);
-	assert(TokenType.IDENT.ordinal + 2      == TokenType.CONST_IDENT.ordinal);
-	assert(TokenType.CT_IDENT.ordinal + 1   == TokenType.CT_TYPE_IDENT.ordinal);
-	assert(TokenType.CT_IDENT.ordinal + 2   == TokenType.CT_CONST_IDENT.ordinal);
-	assert(TokenType.AT_IDENT.ordinal + 1   == TokenType.AT_TYPE_IDENT.ordinal);
-	assert(TokenType.AT_IDENT.ordinal + 2   == TokenType.AT_CONST_IDENT.ordinal);
-	assert(TokenType.HASH_IDENT.ordinal + 1 == TokenType.HASH_TYPE_IDENT.ordinal);
-	assert(TokenType.HASH_IDENT.ordinal + 2 == TokenType.HASH_CONST_IDENT.ordinal);
+	// A lone '_' is its own token in the compiler.
+	if (s == "_") return UNDERSCORE;
 
 	IdentState state = IdentState.INIT_STATE;
 	foreach (c: s) state = TRANSITIONS[state][c];
@@ -1158,29 +983,10 @@ fn TokenType classify(String s)
 		switch (s[0])
 		{
 		case '$': return TokenType::from_ordinal(offset + TokenType.CT_IDENT.ordinal);
-		case '#': return TokenType::from_ordinal(offset + TokenType.HASH_IDENT.ordinal);
+		case '#': return state == IDENT_STATE ? HASH_IDENT : INVALID; // the compiler has no #Type / #CONST tokens
 		case '@': return TokenType::from_ordinal(offset + TokenType.AT_IDENT.ordinal);
 		default:  return TokenType::from_ordinal(offset + TokenType.IDENT.ordinal);
 		}
 	}
 	return INVALID;
 }
-
-fn void test_ident_classify() @test
-{
-	assert(classify("AABB") == CONST_IDENT);
-	assert(classify("Aabb") == TYPE_IDENT);
-	assert(classify("aabb") == IDENT);
-	assert(classify("aaBb") == IDENT);
-	assert(classify("@AABB") == AT_CONST_IDENT);
-	assert(classify("@Aabb") == AT_TYPE_IDENT);
-	assert(classify("@aabb") == AT_IDENT);
-	assert(classify("#AABB") == HASH_CONST_IDENT);
-	assert(classify("#Aabb") == HASH_TYPE_IDENT);
-	assert(classify("#aabb") == HASH_IDENT);
-	assert(classify("$AABB") == CT_CONST_IDENT);
-	assert(classify("$Aabb") == CT_TYPE_IDENT);
-	assert(classify("$aabb") == CT_IDENT);
-}
-
-

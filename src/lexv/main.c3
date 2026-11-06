@@ -189,6 +189,7 @@ fn String token_to_string(Token tok, bool doc_mode = false)
 	case ELLIPSIS: return "...";
 	case AT: return "@";
 	case HASH: return "#";
+	case UNDERSCORE: return "_";
 	case LBRACE: return "{";
 	case RBRACE: return "}";
 	case LBRACKET: return "[";
@@ -214,8 +215,6 @@ fn String token_to_string(Token tok, bool doc_mode = false)
 	case AT_TYPE_IDENT: return "MACRO_TYPE_IDENT";
 	case AT_CONST_IDENT: return "MACRO_CONST_IDENT";
 	case HASH_IDENT: return "HASH_IDENT";
-	case HASH_TYPE_IDENT: return "HASH_TYPE_IDENT";
-	case HASH_CONST_IDENT: return "HASH_CONST_IDENT";
 	case ALIAS: return tok.text;
 	case ASM: return tok.text;
 	case ASSERT: return tok.text;
@@ -316,15 +315,6 @@ fn String token_to_string(Token tok, bool doc_mode = false)
 	case CT_EXPAND: return tok.text;
 	case CT_FEAT: return tok.text;
 	case CT_REFLECT: return tok.text;
-	// TODO: Yacc grammar is updated but c3c lexer still lexes those tokens
-	// as MACRO_IDENT. Fix tests.
-	// case AT_INLINE: return tok.text;
-	// case AT_PURE: return tok.text;
-	// case AT_NOINLINE: return tok.text;
-	case AT_INLINE:
-	case AT_PURE:
-	case AT_NOINLINE:
-		return "MACRO_IDENT";
 	case EOL: return "<EOL>";
 	case EOF: return "EOF";
 	}
