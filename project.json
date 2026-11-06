@@ -1,6 +1,6 @@
 {
 	"authors": [ "Koni Marti <koni.marti@gmail.com>" ],
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"output": "build",
 	"sources": [ "lexer.c3", "lexer_test.c3" ],
 	"targets": {
